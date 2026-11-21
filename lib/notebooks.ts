@@ -8,26 +8,43 @@ export type Stroke = {
   width: number;
   points: Point[];
 };
-export type Page = { id: string; strokes: Stroke[] };
+export type TextBox = { id: string; x: number; y: number; width: number; height: number; text: string };
+export type Page = { id: string; strokes: Stroke[]; textBoxes: TextBox[]; background?: Blob };
 export type Note = {
   id: string;
   name: string;
   folderId: string | null;
   paper: PaperType;
+  paperSpacing: number;
   pages: Page[];
   createdAt: number;
+  updatedAt: number;
 };
 export type Folder = { id: string; name: string; createdAt: number };
 export type Library = { folders: Folder[]; notes: Note[] };
+export type EditorSettings = { id: "editor"; customColors: string[]; penWidth: number; pencilWidth: number };
+
+const defaultSettings: EditorSettings = { id: "editor", customColors: [], penWidth: 4, pencilWidth: 2 };
+
+function normalizeNote(note: Note): Note {
+  return {
+    ...note,
+    paperSpacing: note.paperSpacing ?? 2,
+    updatedAt: note.updatedAt ?? note.createdAt,
+    pages: note.pages.map((page) => ({ ...page, textBoxes: page.textBoxes ?? [] })),
+  };
+}
 
 let connection: Promise<IDBDatabase> | undefined;
 
 function database() {
   connection ??= new Promise<IDBDatabase>((resolve, reject) => {
-    const open = indexedDB.open("scribbler", 1);
+    const open = indexedDB.open("scribbler", 2);
     open.onupgradeneeded = () => {
-      open.result.createObjectStore("folders", { keyPath: "id" });
-      open.result.createObjectStore("notes", { keyPath: "id" });
+      const db = open.result;
+      if (!db.objectStoreNames.contains("folders")) db.createObjectStore("folders", { keyPath: "id" });
+      if (!db.objectStoreNames.contains("notes")) db.createObjectStore("notes", { keyPath: "id" });
+      if (!db.objectStoreNames.contains("settings")) db.createObjectStore("settings", { keyPath: "id" });
     };
     open.onerror = () => reject(open.error);
     open.onsuccess = () => {
@@ -61,16 +78,17 @@ export async function readLibrary(): Promise<Library> {
   ]);
   return {
     folders: folders.sort((a, b) => a.name.localeCompare(b.name)),
-    notes: notes.sort((a, b) => b.createdAt - a.createdAt),
+    notes: notes.map(normalizeNote).sort((a, b) => b.createdAt - a.createdAt),
   };
 }
 
 export async function readNote(id: string) {
   const db = await database();
-  return read<Note | undefined>(db.transaction("notes").objectStore("notes").get(id));
+  const note = await read<Note | undefined>(db.transaction("notes").objectStore("notes").get(id));
+  return note ? normalizeNote(note) : undefined;
 }
 
-async function write(store: "notes" | "folders", item: Note | Folder) {
+async function write(store: "notes" | "folders" | "settings", item: Note | Folder | EditorSettings) {
   const db = await database();
   return new Promise<void>((resolve, reject) => {
     const transaction = db.transaction(store, "readwrite");
@@ -81,7 +99,24 @@ async function write(store: "notes" | "folders", item: Note | Folder) {
 }
 
 export function saveNote(note: Note) {
-  return write("notes", note);
+  return write("notes", normalizeNote(note));
+}
+
+export async function readEditorSettings(): Promise<EditorSettings> {
+  const db = await database();
+  const settings = await read<EditorSettings | undefined>(db.transaction("settings").objectStore("settings").get("editor"));
+  return settings ?? defaultSettings;
+}
+
+export function saveEditorSettings(settings: EditorSettings) {
+  return write("settings", settings);
+}
+
+export function nextUntitledNoteName(notes: Note[], date = new Date()) {
+  const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const pattern = new RegExp(`^Untitled Note (\\d{3}) ${dateKey}$`);
+  const next = notes.reduce((maximum, note) => Math.max(maximum, Number(pattern.exec(note.name)?.[1] ?? 0)), 0) + 1;
+  return `Untitled Note ${String(next).padStart(3, "0")} ${dateKey}`;
 }
 
 export function saveFolder(folder: Folder) {
@@ -89,5 +124,5 @@ export function saveFolder(folder: Folder) {
 }
 
 export function newPage(): Page {
-  return { id: crypto.randomUUID(), strokes: [] };
+  return { id: crypto.randomUUID(), strokes: [], textBoxes: [] };
 }

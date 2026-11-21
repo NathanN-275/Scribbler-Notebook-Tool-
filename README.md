@@ -1,6 +1,6 @@
 # Scribbler
 
-Scribbler is a browser notebook for handwritten notes and study. Create a folder or note from the library, choose a paper type, and open the editor. Notes save automatically in the current browser. The AI tutor panel previews a future AWS integration.
+Scribbler is a browser notebook for handwritten notes and study. Create a folder or note from the library, choose a paper type and spacing, and open the editor. Notes save automatically in the current browser. The editor supports ink, text boxes, local page imports, and PDF export. The AI tutor panel previews a future AWS integration.
 
 ## Run locally
 
@@ -16,10 +16,10 @@ Open [localhost:3000](http://localhost:3000). Use `npm run build` to create a pr
 ## How it fits together
 
 - `app/` defines the landing page, library, and note routes.
-- `components/editor.tsx` coordinates pages, drawing history, and save feedback. `components/ink-canvas.tsx` turns pointer gestures into edits to a page's strokes.
-- `lib/ink.ts` holds drawing and hit detection. `lib/notebooks.ts` owns the notebook model and IndexedDB transactions.
+- `components/editor.tsx` coordinates pages, tool settings, import/export, and save feedback. `components/ink-canvas.tsx` handles drawing, text boxes, selection, and page panning.
+- `lib/ink.ts` holds drawing and hit detection. `lib/files.ts` renders local imports and PDFs. `lib/notebooks.ts` owns the notebook model and IndexedDB transactions.
 
-The eraser removes whole strokes. Undo and redo apply to drawing edits on the current page and reset when the editor closes. Browser storage is specific to each site address and browser profile.
+The eraser removes whole strokes. Undo and redo apply to page edits on the current page and reset when the editor closes. Imported page images and tool settings are local to this browser profile and site address; they do not sync to other devices.
 
 ## Vercel
 

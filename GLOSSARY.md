@@ -13,12 +13,18 @@ A named notebook that contains one or more pages and can belong to a folder.
 _Avoid_: Document, notebook (when referring to a page)
 
 **Page**:
-A single sheet inside a note. All pages in a note share its paper type.
+A single sheet inside a note. All pages in a note share its paper type and spacing; a page can contain strokes, text boxes, and an imported page background.
 _Avoid_: Sheet (as a product term)
 
 **Paper type**:
 The visual guide shown behind the ink on a note's pages: plain, lined, graph, or dotted.
 _Avoid_: Template
+
+**Paper spacing**:
+The density of the lines, graph squares, or dots shown on every page in a note.
+
+**Imported page**:
+A page background rendered from a PDF, DOCX, PNG, or JPEG file. Its source content is fixed while users can write or add text over it.
 
 ## Drawing
 
@@ -26,6 +32,12 @@ _Avoid_: Template
 A continuous mark drawn with the pen or pencil, represented as an individual piece of handwriting.
 _Avoid_: Ink blob
 
+**Text box**:
+An editable plain-text area placed on a page; it can be moved or resized.
+
+**Pan tool**:
+A tool that lets users drag the page around without drawing a stroke.
+
 **Lasso selection**:
-A selection made by drawing a boundary around one or more strokes so they can be moved or deleted.
+A selection made by drawing a freeform boundary; any overlapping strokes or text boxes can be moved or deleted.
 _Avoid_: Scissor selection

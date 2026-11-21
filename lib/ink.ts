@@ -52,6 +52,20 @@ export function caughtByLasso(stroke: Stroke, boundary: Point[]) {
   );
 }
 
+export function caughtRectByLasso(rect: { x: number; y: number; width: number; height: number }, boundary: Point[]) {
+  const corners = [
+    { x: rect.x, y: rect.y },
+    { x: rect.x + rect.width, y: rect.y },
+    { x: rect.x + rect.width, y: rect.y + rect.height },
+    { x: rect.x, y: rect.y + rect.height },
+  ];
+  if (corners.some((point) => inside(point, boundary)) || boundary.some((point) =>
+    point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height,
+  )) return true;
+  const edges = corners.map((point, index) => [point, corners[(index + 1) % corners.length]] as const);
+  return boundary.some((point, index) => edges.some(([a, b]) => crosses(point, boundary[index + 1] ?? boundary[0], a, b)));
+}
+
 export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke, selected: boolean, offset?: Point) {
   const [first, ...rest] = stroke.points;
   if (!first) return;

@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BookOpen, ChevronRight, Folder, FolderOpen, FolderPlus, NotebookPen, Plus, X } from "lucide-react";
 import { Brand } from "./brand";
-import { newPage, paperTypes, readLibrary, saveFolder, saveNote, type Library, type PaperType } from "../lib/notebooks";
+import { newPage, nextUntitledNoteName, paperTypes, readLibrary, saveFolder, saveNote, type Library, type PaperType } from "../lib/notebooks";
+import { PaperPreview, PaperSpacingControl, paperStyle } from "./paper-controls";
 
 type CreateMode = "folder" | "note";
 
@@ -17,6 +18,7 @@ export function LibraryView() {
   const [request, setRequest] = useState(0);
   const [create, setCreate] = useState<CreateMode>();
   const [paper, setPaper] = useState<PaperType>("lined");
+  const [paperSpacing, setPaperSpacing] = useState(2);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -37,6 +39,7 @@ export function LibraryView() {
   function showCreate(mode: CreateMode) {
     setCreateError(false);
     setPaper("lined");
+    setPaperSpacing(2);
     setCreate(mode);
   }
 
@@ -50,8 +53,8 @@ export function LibraryView() {
     event.preventDefault();
     if (!create || isSubmitting.current) return;
     const form = new FormData(event.currentTarget);
-    const name = (form.get("name") as string).trim();
-    if (!name) {
+    const enteredName = (form.get("name") as string).trim();
+    if (create === "folder" && !enteredName) {
       const input = event.currentTarget.elements.namedItem("name") as HTMLInputElement;
       input.setCustomValidity("Enter a name.");
       input.reportValidity();
@@ -60,7 +63,9 @@ export function LibraryView() {
     isSubmitting.current = true;
     setCreating(true);
     setCreateError(false);
-    const item = { id: crypto.randomUUID(), name, createdAt: Date.now() };
+    const createdAt = Date.now();
+    const name = enteredName || nextUntitledNoteName(library?.notes ?? [], new Date(createdAt));
+    const item = { id: crypto.randomUUID(), name, createdAt };
     try {
       if (create === "folder") {
         await saveFolder(item);
@@ -69,7 +74,7 @@ export function LibraryView() {
           folders: [...previous.folders, item].sort((a, b) => a.name.localeCompare(b.name)),
         }));
       } else {
-        await saveNote({ ...item, folderId: (form.get("folderId") as string) || null, paper, pages: [newPage()] });
+        await saveNote({ ...item, updatedAt: createdAt, folderId: (form.get("folderId") as string) || null, paper, paperSpacing, pages: [newPage()] });
         router.push(`/notes/${item.id}`);
       }
       dialog.current?.close();
@@ -136,7 +141,7 @@ export function LibraryView() {
                   <div className="note-grid">
                     {notes.map((note) => (
                       <Link className="note-card" key={note.id} href={`/notes/${note.id}`}>
-                        <div className="note-cover"><div className={`paper-sample ${note.paper}`}><NotebookPen size={26} /></div></div>
+                        <div className="note-cover"><div className={`paper-sample ${note.paper}`} style={paperStyle(note.paperSpacing)}><NotebookPen size={26} /></div></div>
                         <div className="note-info"><strong>{note.name}</strong><span>{note.paper} · {note.pages.length} {note.pages.length === 1 ? "page" : "pages"}</span></div>
                       </Link>
                     ))}
@@ -154,35 +159,44 @@ export function LibraryView() {
           )}
         </main>
       </div>
-      <dialog ref={dialog} className="create-dialog" aria-labelledby="create-title" onClose={() => setCreate(undefined)} onCancel={(event) => { if (creating) event.preventDefault(); }}>
+      <dialog ref={dialog} className={create === "note" ? "create-dialog create-note-dialog" : "create-dialog"} aria-labelledby="create-title" onClose={() => setCreate(undefined)} onCancel={(event) => { if (creating) event.preventDefault(); }}>
         {create && <form onSubmit={submit}>
           <div className="dialog-header">
             <h2 id="create-title">New {create}</h2>
             <button type="button" className="icon-button" aria-label="Close" disabled={creating} onClick={() => dialog.current?.close()}><X size={21} /></button>
           </div>
-          <label className="field">{create === "folder" ? "Folder name" : "Note name"}
-            <input name="name" placeholder={create === "folder" ? "e.g. Calculus" : "e.g. Derivatives"} required maxLength={80} onInput={(event) => event.currentTarget.setCustomValidity("")} />
-          </label>
-          {create === "note" && <>
-            <label className="field">Folder
-              <select name="folderId" defaultValue={folder?.id ?? ""}>
-                <option value="">No folder</option>
-                {library?.folders.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
-            </label>
-            <fieldset className="paper-field">
-              <legend>Paper type</legend>
-              <div className="paper-choices">
-                {paperTypes.map((type) => (
-                  <label key={type} className="paper-option">
-                    <input type="radio" name="paper" value={type} checked={paper === type} onChange={() => setPaper(type)} />
-                    <span className={`paper-sample ${type}`} />
-                    <span>{type}</span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-          </>}
+          {create === "folder" ? <label className="field">Folder name
+            <input name="name" placeholder="e.g. Calculus" required maxLength={80} onInput={(event) => event.currentTarget.setCustomValidity("")} />
+          </label> : <div className="create-note-layout">
+            <div className="create-note-options">
+              <label className="field">Note name <span className="optional-label">(optional)</span>
+                <input name="name" placeholder="Untitled Note" maxLength={80} onInput={(event) => event.currentTarget.setCustomValidity("")} />
+              </label>
+              <label className="field">Folder
+                <select name="folderId" defaultValue={folder?.id ?? ""}>
+                  <option value="">No folder</option>
+                  {library?.folders.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
+              </label>
+              <fieldset className="paper-field">
+                <legend>Paper type</legend>
+                <div className="paper-choices">
+                  {paperTypes.map((type) => (
+                    <label key={type} className="paper-option">
+                      <input type="radio" name="paper" value={type} checked={paper === type} onChange={() => setPaper(type)} />
+                      <PaperPreview paper={type} spacing={paperSpacing} />
+                      <span>{type}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              {paper !== "plain" && <PaperSpacingControl value={paperSpacing} onChange={setPaperSpacing} />}
+            </div>
+            <div className="create-note-preview">
+              <span>Preview</span>
+              <PaperPreview paper={paper} spacing={paperSpacing} className="large-paper-preview" />
+            </div>
+          </div>}
           {createError && <p className="error-text" role="alert">Couldn’t save this {create}. Try again.</p>}
           <div className="dialog-actions">
             <button type="button" className="button button-outline" disabled={creating} onClick={() => dialog.current?.close()}>Cancel</button>
