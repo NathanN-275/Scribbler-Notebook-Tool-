@@ -59,6 +59,17 @@ export const defaultEditorSettings: EditorSettings = {
   id: "editor", customColors: [], hiddenDefaultColors: [], penWidth: 4, pencilWidth: 2, eraserRadius: 16, eraserMode: "stroke",
 };
 
+export function storageFailureMessage(error: unknown, action: string) {
+  const name = error && typeof error === "object" && "name" in error ? String(error.name) : "";
+  if (name === "QuotaExceededError") {
+    return `Browser storage is full, so Scribbler couldn’t ${action}. Create a backup, remove notes or imported pages you no longer need, then retry.`;
+  }
+  if (["SecurityError", "InvalidStateError", "NotAllowedError"].includes(name)) {
+    return `Browser storage is unavailable, so Scribbler couldn’t ${action}. Allow this site to use local storage, then retry.`;
+  }
+  return `Scribbler couldn’t ${action} in this browser. Keep this tab open and retry; if it continues, create a backup before changing site data.`;
+}
+
 function normalizeNote(note: Note): Note {
   return {
     ...note,

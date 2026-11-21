@@ -16,7 +16,9 @@ Build a browser-based note-taking frontend for the cloud computing class project
 - The editor follows the reference screenshot's broad layout: top navigation and tool controls, a large paper canvas, compact page navigation, and Scribbler styling.
 - The editor has pen, pencil, eraser, lasso, undo, and redo. Pen and pencil have independent size presets and color swatches. Lasso selection supports moving and deleting ink strokes.
 - A toggleable AI panel appears as a nonfunctional placeholder. Live AI, handwriting recognition, and AWS integration are deferred.
-- Support mouse/trackpad and touch input.
+- Support mouse/trackpad and touch input. One finger draws or pans; two fingers pan and pinch to zoom.
+- Provide keyboard shortcuts for undo/redo, selection copy/paste, page navigation, zoom, and drawing-tool selection, with a visible accessible guide and browser-local editable tool bindings (Q/W/E/R/T/Y by default).
+- Explain storage-full and storage-unavailable save failures and keep an explicit retry action in the editor.
 - Save changes automatically in the current browser using IndexedDB. No sign-in or cross-device sync.
 - Sharing and nested folders are deferred. PDF export and full-library backup/restore, including Trash, are available locally.
 
