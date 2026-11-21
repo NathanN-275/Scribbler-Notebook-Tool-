@@ -1,5 +1,9 @@
 # Scribbler
 
+[Open Scribbler on Vercel](https://scribblernotebook.vercel.app/)
+
+![Scribbler homepage with a preview of handwritten calculus notes on graph paper](docs/images/scribbler-home.png)
+
 Scribbler is a browser notebook for handwritten notes and study. Create a folder or note from the library, choose a paper type and spacing, and open the editor. Notes save automatically in the current browser. The editor supports ink, text boxes, local page imports, and PDF export. The AI tutor panel previews a future AWS integration.
 
 ## Run locally
