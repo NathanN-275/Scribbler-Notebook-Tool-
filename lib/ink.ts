@@ -33,6 +33,96 @@ export function hitsStroke(stroke: Stroke, from: Point, to: Point, radius: numbe
   return stroke.points.some((point, index) => touches(stroke.points[index - 1] ?? point, point, from, to, radius + stroke.width / 2));
 }
 
+type Interval = [number, number];
+
+function eraseInterval(start: Point, end: Point, from: Point, to: Point, radius: number): Interval | undefined {
+  if (!touches(start, end, from, to, radius)) return;
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (!lengthSquared) return [0, 1];
+
+  let first = 1;
+  let last = 0;
+  function include(min: number, max: number) {
+    if (min > max || max < 0 || min > 1) return;
+    first = Math.min(first, Math.max(0, min));
+    last = Math.max(last, Math.min(1, max));
+  }
+
+  // A swept circular eraser covers two end circles and the rectangle between them.
+  for (const center of [from, to]) {
+    const x = start.x - center.x;
+    const y = start.y - center.y;
+    const projection = x * dx + y * dy;
+    const discriminant = projection ** 2 - lengthSquared * (x * x + y * y - radius * radius);
+    if (discriminant < 0) continue;
+    const offset = Math.sqrt(discriminant);
+    include((-projection - offset) / lengthSquared, (-projection + offset) / lengthSquared);
+  }
+
+  const travel = Math.hypot(to.x - from.x, to.y - from.y);
+  if (travel) {
+    const ux = (to.x - from.x) / travel;
+    const uy = (to.y - from.y) / travel;
+    const x = start.x - from.x;
+    const y = start.y - from.y;
+    const along = axisInterval(x * ux + y * uy, dx * ux + dy * uy, 0, travel);
+    const across = axisInterval(-x * uy + y * ux, -dx * uy + dy * ux, -radius, radius);
+    if (along && across) include(Math.max(along[0], across[0]), Math.min(along[1], across[1]));
+  }
+
+  if (last - first > 1e-9) return [first, last];
+}
+
+function axisInterval(start: number, delta: number, min: number, max: number): Interval | undefined {
+  if (Math.abs(delta) < 1e-9) return start >= min && start <= max ? [0, 1] : undefined;
+  const first = (min - start) / delta;
+  const last = (max - start) / delta;
+  return [Math.min(first, last), Math.max(first, last)];
+}
+
+export function eraseStrokePoints(stroke: Stroke, from: Point, to: Point, radius: number): Stroke[] | undefined {
+  const reach = radius + stroke.width / 2;
+  const points = stroke.points;
+  if (points.length === 1) return pointSegmentDistance(points[0], from, to) <= reach ? [] : undefined;
+
+  const fragments: Point[][] = [];
+  let fragment: Point[] | undefined;
+  let changed = false;
+  for (let index = 1; index < points.length; index++) {
+    const start = points[index - 1];
+    const end = points[index];
+    const cut = eraseInterval(start, end, from, to, reach);
+    if (!fragment) {
+      fragment = [start];
+      fragments.push(fragment);
+    }
+    if (!cut) {
+      fragment.push(end);
+      continue;
+    }
+
+    changed = true;
+    const pointAt = (position: number) => ({
+      x: start.x + (end.x - start.x) * position,
+      y: start.y + (end.y - start.y) * position,
+    });
+    const [first, last] = cut;
+    if (first > 0) fragment.push(pointAt(first));
+    if (fragment.length === 1) fragments.pop();
+    fragment = undefined;
+    if (last < 1) {
+      fragment = [pointAt(last), end];
+      fragments.push(fragment);
+    }
+  }
+
+  if (changed) return fragments.map((points, index) => ({
+    ...stroke, points, id: index === 0 ? stroke.id : crypto.randomUUID(),
+  }));
+}
+
 function inside(point: Point, boundary: Point[]) {
   let enclosed = false;
   for (let i = 0, j = boundary.length - 1; i < boundary.length; j = i++) {

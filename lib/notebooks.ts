@@ -24,9 +24,20 @@ export type Note = {
 };
 export type Folder = { id: string; name: string; createdAt: number };
 export type Library = { folders: Folder[]; notes: Note[] };
-export type EditorSettings = { id: "editor"; customColors: string[]; penWidth: number; pencilWidth: number; eraserRadius: number };
+export type EraserMode = "stroke" | "point";
+export type EditorSettings = {
+  id: "editor";
+  customColors: string[];
+  hiddenDefaultColors: string[];
+  penWidth: number;
+  pencilWidth: number;
+  eraserRadius: number;
+  eraserMode: EraserMode;
+};
 
-export const defaultEditorSettings: EditorSettings = { id: "editor", customColors: [], penWidth: 4, pencilWidth: 2, eraserRadius: 16 };
+export const defaultEditorSettings: EditorSettings = {
+  id: "editor", customColors: [], hiddenDefaultColors: [], penWidth: 4, pencilWidth: 2, eraserRadius: 16, eraserMode: "stroke",
+};
 
 function normalizeNote(note: Note): Note {
   return {

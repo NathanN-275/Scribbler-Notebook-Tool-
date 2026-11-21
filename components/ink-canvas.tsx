@@ -2,23 +2,36 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import { Trash2 } from "lucide-react";
-import type { Page, PaperType, Point, Stroke, TextBox } from "../lib/notebooks";
-import { caughtByLasso, caughtRectByLasso, drawStroke, hitsStroke, pageHeight, pageWidth, shiftStroke } from "../lib/ink";
+import type { EraserMode, Page, PaperType, Point, Stroke, TextBox } from "../lib/notebooks";
+import { caughtByLasso, caughtRectByLasso, drawStroke, eraseStrokePoints, hitsStroke, pageHeight, pageWidth, shiftStroke } from "../lib/ink";
 import { paperStyle } from "./paper-controls";
 
 export type DrawingTool =
   | { type: "pen" | "pencil"; color: string; width: number }
-  | { type: "eraser"; radius: number }
+  | { type: "eraser"; radius: number; mode: EraserMode }
   | { type: "lasso" | "pan" | "text" };
 
 type EditPage = (pageId: string, update: (page: Page) => Page) => void;
+type EraseGesture = { type: "erase"; radius: number; mode: EraserMode; edits: Map<string, Stroke[]> };
 type Gesture = { pointerId: number; last: Point } & (
   | { type: "draw"; stroke: Stroke }
-  | { type: "erase"; removed: Set<string>; radius: number }
+  | EraseGesture
   | { type: "lasso"; boundary: Point[] }
   | { type: "move"; start: Point; offset: Point }
   | { type: "pan"; start: Point; scrollLeft: number; scrollTop: number }
 );
+
+function applyErasure(strokes: Stroke[], eraser: EraseGesture) {
+  return strokes.flatMap((stroke) => eraser.edits.get(stroke.id) ?? stroke);
+}
+
+function commitInkGesture(current: Gesture | null, pageId: string, onEdit: EditPage) {
+  if (current?.type === "draw") {
+    onEdit(pageId, (page) => ({ ...page, strokes: [...page.strokes, current.stroke] }));
+  } else if (current?.type === "erase" && current.edits.size) {
+    onEdit(pageId, (page) => ({ ...page, strokes: applyErasure(page.strokes, current) }));
+  }
+}
 
 export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, onEdit }: {
   page: Page;
@@ -42,9 +55,7 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, o
   useEffect(() => {
     const pageId = page.id;
     return () => {
-      const current = gesture.current;
-      if (current?.type === "draw") onEdit(pageId, (data) => ({ ...data, strokes: [...data.strokes, current.stroke] }));
-      if (current?.type === "erase" && current.removed.size) onEdit(pageId, (data) => ({ ...data, strokes: data.strokes.filter((stroke) => !current.removed.has(stroke.id)) }));
+      commitInkGesture(gesture.current, pageId, onEdit);
       gesture.current = null;
     };
   }, [onEdit, page.id]);
@@ -81,8 +92,8 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, o
     ctx.clearRect(0, 0, pageWidth, pageHeight);
     const current = gesture.current;
     const selected = new Set(selection);
-    for (const stroke of page.strokes) {
-      if (current?.type === "erase" && current.removed.has(stroke.id)) continue;
+    const strokes = current?.type === "erase" ? applyErasure(page.strokes, current) : page.strokes;
+    for (const stroke of strokes) {
       drawStroke(ctx, stroke, selected.has(stroke.id), current?.type === "move" && selected.has(stroke.id) ? current.offset : undefined);
     }
     if (current?.type === "draw") drawStroke(ctx, current.stroke, false);
@@ -124,8 +135,23 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, o
     };
   }
 
-  function eraseBetween(from: Point, to: Point, removed: Set<string>, radius: number) {
-    for (const stroke of page.strokes) if (!removed.has(stroke.id) && hitsStroke(stroke, from, to, radius)) removed.add(stroke.id);
+  function eraseBetween(from: Point, to: Point, eraser: EraseGesture) {
+    for (const stroke of page.strokes) {
+      if (eraser.mode === "stroke") {
+        if (!eraser.edits.has(stroke.id) && hitsStroke(stroke, from, to, eraser.radius)) eraser.edits.set(stroke.id, []);
+        continue;
+      }
+
+      const fragments = eraser.edits.get(stroke.id) ?? [stroke];
+      let changed = false;
+      const remaining = fragments.flatMap((fragment) => {
+        const trimmed = eraseStrokePoints(fragment, from, to, eraser.radius);
+        if (!trimmed) return fragment;
+        changed = true;
+        return trimmed;
+      });
+      if (changed) eraser.edits.set(stroke.id, remaining);
+    }
   }
 
   function startGesture(event: PointerEvent<HTMLCanvasElement>) {
@@ -142,9 +168,9 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, o
     if (tool.type === "pen" || tool.type === "pencil") {
       gesture.current = { ...base, type: "draw", stroke: { id: crypto.randomUUID(), tool: tool.type, color: tool.color, width: tool.width, points: [point] } };
     } else if (tool.type === "eraser") {
-      const removed = new Set<string>();
-      eraseBetween(point, point, removed, tool.radius);
-      gesture.current = { ...base, type: "erase", removed, radius: tool.radius };
+      const eraser = { ...base, type: "erase" as const, radius: tool.radius, mode: tool.mode, edits: new Map<string, Stroke[]>() };
+      eraseBetween(point, point, eraser);
+      gesture.current = eraser;
     } else if (tool.type === "pan") {
       gesture.current = { ...base, type: "pan", start: { x: event.clientX, y: event.clientY }, scrollLeft: scroll.current?.scrollLeft ?? 0, scrollTop: scroll.current?.scrollTop ?? 0 };
     } else if (tool.type === "lasso") {
@@ -174,7 +200,7 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, o
     if (point.x === current.last.x && point.y === current.last.y) return;
     if (current.type === "draw") current.stroke.points.push(point);
     if (current.type === "lasso") current.boundary.push(point);
-    if (current.type === "erase") eraseBetween(current.last, point, current.removed, current.radius);
+    if (current.type === "erase") eraseBetween(current.last, point, current);
     if (current.type === "move") current.offset = { x: point.x - current.start.x, y: point.y - current.start.y };
     if (current.type === "move" && textLayer.current) {
       const rect = canvas.current?.getBoundingClientRect();
@@ -192,9 +218,8 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, o
     if (!current || current.pointerId !== event.pointerId) return;
     if (!cancel) updateGesture(event);
     gesture.current = null;
-    if (!cancel || current.type === "draw" || current.type === "erase") {
-      if (current.type === "draw") onEdit(page.id, (data) => ({ ...data, strokes: [...data.strokes, current.stroke] }));
-      if (current.type === "erase" && current.removed.size) onEdit(page.id, (data) => ({ ...data, strokes: data.strokes.filter((stroke) => !current.removed.has(stroke.id)) }));
+    commitInkGesture(current, page.id, onEdit);
+    if (!cancel) {
       if (current.type === "lasso" && current.boundary.length >= 3) {
         setSelectedIds([
           ...page.strokes.filter((stroke) => caughtByLasso(stroke, current.boundary)).map((stroke) => stroke.id),

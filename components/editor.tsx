@@ -6,6 +6,7 @@ import { BookOpen, Check, ChevronLeft, ChevronRight, Download, Eraser, FileText,
 import { defaultEditorSettings, newPage, nextUntitledNoteName, readEditorSettings, readLibrary, readNote, saveEditorSettings, saveNote, type EditorSettings, type Note, type Page } from "../lib/notebooks";
 import { downloadBlob, makePdf, prepareFilePages, renderPageBlob } from "../lib/files";
 import { InkCanvas, type DrawingTool } from "./ink-canvas";
+import { InkPalette } from "./ink-palette";
 import { PaperControls, PaperPreview } from "./paper-controls";
 
 const tools = [
@@ -26,6 +27,14 @@ const colors = [
 const sizeLabels = ["Fine", "Medium", "Bold"];
 const sizeWidths = [2, 4, 8];
 const eraserRadii = [8, 16, 28];
+
+function availableSwatches(settings: EditorSettings) {
+  return [
+    ...colors.filter((color) => !settings.hiddenDefaultColors.includes(color.value)),
+    ...settings.customColors.filter((value) => !colors.some((color) => color.value === value))
+      .map((value) => ({ name: `Custom color ${value}`, value })),
+  ];
+}
 
 type Tool = (typeof tools)[number]["id"];
 type SizedTool = "pen" | "pencil" | "eraser";
@@ -75,7 +84,7 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   const [inkColors, setInkColors] = useState({ pen: colors[0].value, pencil: colors[0].value });
   const [settings, setSettings] = useState(defaultEditorSettings);
   const [settingsError, setSettingsError] = useState(false);
-  const [widthSlider, setWidthSlider] = useState<SizedTool | null>(null);
+  const [widthSlider, setWidthSlider] = useState<{ tool: SizedTool; preset: number }>();
   const [aiOpen, setAiOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [renameOpen, setRenameOpen] = useState(false);
@@ -83,7 +92,6 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   const [renameError, setRenameError] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
   const [paperDraft, setPaperDraft] = useState<PaperSettings>();
-  const [colorDraft, setColorDraft] = useState(colors[0].value);
   const [uploadPages, setUploadPages] = useState<PreparedPage[]>([]);
   const [uploadSelection, setUploadSelection] = useState<string[]>([]);
   const [uploadErrors, setUploadErrors] = useState<string[]>([]);
@@ -94,7 +102,7 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   const histories = useRef(new Map<string, History>());
   const latestSave = useRef(0);
   const noteRef = useRef<Note | null | undefined>(undefined);
-  const colorDialog = useRef<HTMLDialogElement>(null);
+  const eraserDialog = useRef<HTMLDialogElement>(null);
   const paperDialog = useRef<HTMLDialogElement>(null);
   const uploadInput = useRef<HTMLInputElement>(null);
   const renameDialog = useRef<HTMLDialogElement>(null);
@@ -107,10 +115,12 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   const sizeKey = tool === "eraser" ? "eraserRadius" : tool === "pencil" ? "pencilWidth" : "penWidth";
   const size = settings[sizeKey];
   const presets = tool === "eraser" ? eraserRadii : sizeWidths;
-  const activePreset = presets.reduce((closest, preset) => Math.abs(preset - size) < Math.abs(closest - size) ? preset : closest);
+  const sizeSliderOpen = widthSlider && widthSlider.tool === sizedTool;
+  const activePreset = sizeSliderOpen ? widthSlider.preset :
+    presets.reduce((closest, preset) => Math.abs(preset - size) < Math.abs(closest - size) ? preset : closest);
   const drawingTool: DrawingTool = tool === "pen" || tool === "pencil"
     ? { type: tool, color: inkColors[tool], width: size }
-    : tool === "eraser" ? { type: tool, radius: size }
+    : tool === "eraser" ? { type: tool, radius: size, mode: settings.eraserMode }
       : { type: tool };
 
   useEffect(() => {
@@ -119,6 +129,8 @@ export function NoteEditor({ noteId }: { noteId: string }) {
     readEditorSettings().then((stored) => {
       if (!active) return;
       setSettings(stored);
+      const fallback = availableSwatches(stored)[0]?.value ?? colors[0].value;
+      setInkColors({ pen: fallback, pencil: fallback });
     }, () => { if (active) setSettingsError(true); });
     return () => { active = false; };
   }, [noteId, loadRequest]);
@@ -209,15 +221,34 @@ export function NoteEditor({ noteId }: { noteId: string }) {
     try { await saveEditorSettings(updated); } catch { setSettingsError(true); }
   }
 
-  function submitColor(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function selectColor(value: string) {
     if (tool !== "pen" && tool !== "pencil") return;
-    const value = String(new FormData(event.currentTarget).get("color")).toLowerCase();
-    if (!colors.some((color) => color.value === value) && !settings.customColors.includes(value)) {
+    setInkColors((current) => ({ ...current, [tool]: value }));
+  }
+
+  function addColor(value: string) {
+    if (settings.hiddenDefaultColors.includes(value)) {
+      void saveSettings({ ...settings, hiddenDefaultColors: settings.hiddenDefaultColors.filter((color) => color !== value) });
+    } else if (!availableSwatches(settings).some((color) => color.value === value)) {
       void saveSettings({ ...settings, customColors: [...settings.customColors, value] });
     }
-    setInkColors((current) => ({ ...current, [tool]: value }));
-    colorDialog.current?.close();
+    selectColor(value);
+  }
+
+  function removeColors(value?: string) {
+    const hidden = colors.filter((color) => !value || color.value === value).map((color) => color.value);
+    const updated = {
+      ...settings,
+      hiddenDefaultColors: [...new Set([...settings.hiddenDefaultColors, ...hidden])],
+      customColors: value ? settings.customColors.filter((color) => color !== value) : [],
+    };
+    const remaining = availableSwatches(updated);
+    const fallback = remaining[0]?.value ?? colors[0].value;
+    setInkColors((current) => ({
+      pen: remaining.some((color) => color.value === current.pen) ? current.pen : fallback,
+      pencil: remaining.some((color) => color.value === current.pencil) ? current.pencil : fallback,
+    }));
+    void saveSettings(updated);
   }
 
   function submitPaper(event: FormEvent<HTMLFormElement>) {
@@ -333,38 +364,28 @@ export function NoteEditor({ noteId }: { noteId: string }) {
     </header>
     <div className="editor-toolbar" role="group" aria-label="Drawing tools">
       <div className="tool-group">
-        {tools.map(({ id, label, Icon }) => <ToolButton key={id} label={label} active={tool === id} onClick={() => { setTool(id); setWidthSlider(null); }}><Icon size={20} /></ToolButton>)}
+        {tools.map(({ id, label, Icon }) => <ToolButton key={id} label={label} active={tool === id} onClick={() => {
+          if (id === "eraser" && tool === "eraser") {
+            eraserDialog.current?.showModal();
+            return;
+          }
+          setTool(id);
+          setWidthSlider(undefined);
+        }}><Icon size={20} /></ToolButton>)}
       </div>
-      {(tool === "pen" || tool === "pencil") && <div className="tool-group swatches" role="group" aria-label={`${tool} colors`}>
-        {colors.map(({ name, value }) => <button type="button" className="swatch" key={value} aria-label={name} data-tooltip={name} aria-pressed={inkColors[tool] === value}
-          onClick={() => setInkColors((current) => ({ ...current, [tool]: value }))}><span style={{ backgroundColor: value }} /></button>)}
-        {settings.customColors.map((value) => <span className="custom-swatch-wrap" key={value}>
-          <button type="button" className="swatch" aria-label={`Custom color ${value}`} data-tooltip={`Custom ${value}`} aria-pressed={inkColors[tool] === value}
-            onClick={() => setInkColors((current) => ({ ...current, [tool]: value }))}><span style={{ backgroundColor: value }} /></button>
-          <button type="button" className="remove-swatch" aria-label={`Remove custom color ${value}`} onClick={() => {
-            void saveSettings({ ...settings, customColors: settings.customColors.filter((color) => color !== value) });
-            setInkColors((current) => ({
-              pen: current.pen === value ? colors[0].value : current.pen,
-              pencil: current.pencil === value ? colors[0].value : current.pencil,
-            }));
-          }}><X size={11} /></button>
-        </span>)}
-        <button type="button" className="swatch add-color" aria-label="Add custom color" aria-haspopup="dialog" data-tooltip="Add color" onClick={() => {
-          setColorDraft(inkColors[tool]);
-          colorDialog.current?.showModal();
-        }}><Plus size={18} /></button>
-      </div>}
+      {(tool === "pen" || tool === "pencil") && <InkPalette tool={tool} swatches={availableSwatches(settings)} selected={inkColors[tool]}
+        onSelect={selectColor} onSave={addColor} onRemove={removeColors} />}
       {sizedTool && <div className="tool-group size-buttons" role="group" aria-label={`${sizedTool} sizes`}>
         {presets.map((preset, index) => <ToolButton key={preset} label={`${sizeLabels[index]} ${sizedTool}`} active={activePreset === preset} onClick={() => {
           if (activePreset === preset) {
-            setWidthSlider(widthSlider === sizedTool ? null : sizedTool);
+            setWidthSlider(sizeSliderOpen ? undefined : { tool: sizedTool, preset });
           } else {
             void saveSettings({ ...settings, [sizeKey]: preset });
-            setWidthSlider(null);
+            setWidthSlider(undefined);
           }
-        }}><span className="size-dot" style={{ width: 5 + index * 4, height: 5 + index * 4 }} /></ToolButton>)}
+        }}><span className="size-dot" style={{ "--dot-size": `${5 + (sizedTool !== "eraser" && activePreset === preset ? size : index * 4)}px` } as React.CSSProperties} /></ToolButton>)}
       </div>}
-      {sizedTool && widthSlider === sizedTool && <label className="width-slider">{size}px
+      {sizedTool && sizeSliderOpen && <label className="width-slider">{size}px
         <input type="range" min={tool === "eraser" ? 8 : 1} max={tool === "eraser" ? 28 : 20} step="1" value={size}
           aria-label={tool === "eraser" ? "Eraser size" : `${tool} width`} aria-valuetext={`${size} pixels`}
           onChange={(event) => void saveSettings({ ...settings, [sizeKey]: event.currentTarget.valueAsNumber })} />
@@ -426,21 +447,20 @@ export function NoteEditor({ noteId }: { noteId: string }) {
         </div>
       </form>
     </dialog>
-    <dialog ref={colorDialog} className="create-dialog color-dialog" aria-labelledby="color-title">
-      <form onSubmit={submitColor}>
-        <div className="dialog-header"><h2 id="color-title">Add custom color</h2>
-          <button type="button" className="icon-button" aria-label="Close color picker" onClick={() => colorDialog.current?.close()}><X size={21} /></button>
-        </div>
-        <div className="color-draft">
-          <label htmlFor="custom-color">Color</label>
-          <input id="custom-color" name="color" type="color" value={colorDraft} onInput={(event) => setColorDraft(event.currentTarget.value)} />
-          <span>{colorDraft}</span>
-        </div>
-        <div className="dialog-actions">
-          <button type="button" className="button button-outline" onClick={() => colorDialog.current?.close()}>Cancel</button>
-          <button className="button button-primary">Save color</button>
-        </div>
-      </form>
+    <dialog ref={eraserDialog} className="create-dialog" aria-labelledby="eraser-title">
+      <div className="dialog-header"><h2 id="eraser-title">Eraser mode</h2>
+        <button type="button" className="icon-button" aria-label="Close eraser settings" onClick={() => eraserDialog.current?.close()}><X size={21} /></button>
+      </div>
+      <div className="eraser-options" role="group" aria-label="Eraser modes">
+        <button type="button" className="button button-outline" aria-pressed={settings.eraserMode === "stroke"} onClick={() => {
+          void saveSettings({ ...settings, eraserMode: "stroke" });
+          eraserDialog.current?.close();
+        }}><strong>Stroke eraser</strong><span>Erase an entire stroke.</span></button>
+        <button type="button" className="button button-outline" aria-pressed={settings.eraserMode === "point"} onClick={() => {
+          void saveSettings({ ...settings, eraserMode: "point" });
+          eraserDialog.current?.close();
+        }}><strong>Point eraser</strong><span>Erase only the part you touch.</span></button>
+      </div>
     </dialog>
     <dialog ref={renameDialog} className="create-dialog rename-dialog" aria-labelledby="rename-title" onClose={() => setRenameOpen(false)}>
       <form onSubmit={submitRename}>
