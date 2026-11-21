@@ -219,7 +219,7 @@ p { line-height: 1.65; }
 .remove-swatch:hover, .remove-swatch:focus-visible { background: #faece9; color: #8b4a45; }
 .palette-pagination { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; font-size: .85rem; }
 .palette-footer { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 11px; }
-.palette-footer p, .palette-empty { font-size: .87rem; color: var(--muted); }
+.palette-footer p { font-size: .87rem; color: var(--muted); }
 .palette-footer .dialog-actions { margin-top: 5px; }
 .palette-delete-all { color: #8b4a45; }
 .add-color { border: 1px dashed #9aad9e; }

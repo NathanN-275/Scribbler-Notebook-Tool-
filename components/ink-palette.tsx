@@ -26,8 +26,9 @@ export function InkPalette({ tool, swatches, selected, onSelect, onSave, onRemov
   const [draft, setDraft] = useState(selected);
   const [pageIndex, setPageIndex] = useState(0);
   const [confirmClear, setConfirmClear] = useState(false);
-  const pageCount = Math.ceil(swatches.length / pageSize);
-  const currentPage = Math.min(pageIndex, Math.max(0, pageCount - 1));
+  const paletteSlots = [null, ...swatches];
+  const pageCount = Math.ceil(paletteSlots.length / pageSize);
+  const currentPage = Math.min(pageIndex, pageCount - 1);
 
   const quickSwatches = swatches.slice(0, quickSize);
   const activeSwatch = swatches.find((swatch) => swatch.value === selected);
@@ -40,6 +41,11 @@ export function InkPalette({ tool, swatches, selected, onSelect, onSave, onRemov
     setPageIndex(index);
   }
 
+  function openColorPicker() {
+    setDraft(selected);
+    colorDialog.current?.showModal();
+  }
+
   function submitColor(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     onSave(draft.toLowerCase());
@@ -47,54 +53,51 @@ export function InkPalette({ tool, swatches, selected, onSelect, onSave, onRemov
   }
 
   return <div className="tool-group swatches" role="group" aria-label={`${tool} colors`}>
-      {quickSwatches.map((swatch) => <SwatchButton key={swatch.value} swatch={swatch} selected={swatch.value === selected}
-        onClick={() => onSelect(swatch.value)} />)}
-      <button type="button" className="swatch add-color" aria-label="Add custom color" aria-haspopup="dialog" data-tooltip="Add color" onClick={() => {
-        setDraft(selected);
-        colorDialog.current?.showModal();
-      }}><Plus size={18} /></button>
-      <button type="button" className="editor-tool" aria-label="Color palette" aria-haspopup="dialog" data-tooltip="Color palette" onClick={() => {
-        paletteDialog.current?.showModal();
-        selectPage(0);
-      }}><Grid3X3 size={18} /></button>
+    {quickSwatches.map((swatch) => <SwatchButton key={swatch.value} swatch={swatch} selected={swatch.value === selected}
+      onClick={() => onSelect(swatch.value)} />)}
+    <button type="button" className="swatch add-color" aria-label="Add custom color" aria-haspopup="dialog" data-tooltip="Add color" onClick={openColorPicker}><Plus size={18} /></button>
+    <button type="button" className="editor-tool" aria-label="Color palette" aria-haspopup="dialog" data-tooltip="Color palette" onClick={() => {
+      paletteDialog.current?.showModal();
+      selectPage(0);
+    }}><Grid3X3 size={18} /></button>
     <dialog ref={paletteDialog} className="create-dialog" aria-labelledby="palette-title" onClose={() => setConfirmClear(false)}>
       <div className="dialog-header">
         <h2 id="palette-title">Color palette</h2>
         <button type="button" className="icon-button" aria-label="Close color palette" onClick={() => paletteDialog.current?.close()}><X size={21} /></button>
       </div>
-      {pageCount ? <>
-        <div ref={pages} className="palette-pages" onScroll={(event) => {
-          const { scrollLeft, clientWidth } = event.currentTarget;
-          if (clientWidth) setPageIndex(Math.round(scrollLeft / clientWidth));
-        }}>
-          {Array.from({ length: pageCount }, (_, index) => <div key={index} className="palette-page">
-            {swatches.slice(index * pageSize, (index + 1) * pageSize).map((swatch) => <div className="palette-item" key={swatch.value}>
+      <div ref={pages} className="palette-pages" onScroll={(event) => {
+        const { scrollLeft, clientWidth } = event.currentTarget;
+        if (clientWidth) setPageIndex(Math.round(scrollLeft / clientWidth));
+      }}>
+        {Array.from({ length: pageCount }, (_, index) => <div key={index} className="palette-page">
+          {paletteSlots.slice(index * pageSize, (index + 1) * pageSize).map((swatch) => <div className="palette-item" key={swatch?.value ?? "add-color"}>
+            {swatch ? <>
               <SwatchButton swatch={swatch} selected={swatch.value === selected} onClick={() => {
                 onSelect(swatch.value);
                 paletteDialog.current?.close();
               }} />
               <button type="button" className="remove-swatch" aria-label={`Delete ${swatch.name}`} onClick={() => onRemove(swatch.value)}><X size={12} /></button>
-            </div>)}
+            </> : <button type="button" className="swatch add-color" aria-label="Add custom color" aria-haspopup="dialog" data-tooltip="Add color" onClick={openColorPicker}><Plus size={18} /></button>}
           </div>)}
+        </div>)}
+      </div>
+      {pageCount > 1 && <nav className="palette-pagination" aria-label="Palette pages">
+        <button type="button" className="icon-button" aria-label="Previous palette page" disabled={currentPage === 0} onClick={() => selectPage(currentPage - 1)}><ChevronLeft size={18} /></button>
+        <span aria-live="polite">Page {currentPage + 1} of {pageCount}</span>
+        <button type="button" className="icon-button" aria-label="Next palette page" disabled={currentPage + 1 === pageCount} onClick={() => selectPage(currentPage + 1)}><ChevronRight size={18} /></button>
+      </nav>}
+      {swatches.length > 0 && <div className="palette-footer">
+        {confirmClear && <p>Clear every swatch for both Pen and Pencil?</p>}
+        <div className="dialog-actions">
+          {confirmClear && <button type="button" className="button button-outline" onClick={() => setConfirmClear(false)}>Cancel</button>}
+          <button type="button" className="button button-outline palette-delete-all" onClick={() => {
+            if (confirmClear) {
+              onRemove();
+              setConfirmClear(false);
+            } else setConfirmClear(true);
+          }}>{confirmClear ? "Delete all swatches" : "Delete all"}</button>
         </div>
-        {pageCount > 1 && <nav className="palette-pagination" aria-label="Palette pages">
-          <button type="button" className="icon-button" aria-label="Previous palette page" disabled={currentPage === 0} onClick={() => selectPage(currentPage - 1)}><ChevronLeft size={18} /></button>
-          <span aria-live="polite">Page {currentPage + 1} of {pageCount}</span>
-          <button type="button" className="icon-button" aria-label="Next palette page" disabled={currentPage + 1 === pageCount} onClick={() => selectPage(currentPage + 1)}><ChevronRight size={18} /></button>
-        </nav>}
-        <div className="palette-footer">
-          {confirmClear && <p>Clear every swatch for both Pen and Pencil?</p>}
-          <div className="dialog-actions">
-            {confirmClear && <button type="button" className="button button-outline" onClick={() => setConfirmClear(false)}>Cancel</button>}
-            <button type="button" className="button button-outline palette-delete-all" onClick={() => {
-              if (confirmClear) {
-                onRemove();
-                setConfirmClear(false);
-              } else setConfirmClear(true);
-            }}>{confirmClear ? "Delete all swatches" : "Delete all"}</button>
-          </div>
-        </div>
-      </> : <p className="palette-empty">No swatches. Use + on the toolbar to add a color.</p>}
+      </div>}
     </dialog>
     <dialog ref={colorDialog} className="create-dialog color-dialog" aria-label="Add custom color">
       <form onSubmit={submitColor}>
