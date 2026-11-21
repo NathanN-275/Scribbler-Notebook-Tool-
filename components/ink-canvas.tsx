@@ -374,7 +374,6 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
       <div className="paper-zoom" style={{ "--zoom": zoom } as CSSProperties}>
         <div className={`editor-paper ${paper}`} style={paperStyle(paperSpacing)}>
           {backgroundUrl && <img className="page-background" src={backgroundUrl} alt="Imported page background" />}
-          <div className="page-header-guides" aria-hidden="true" />
           <canvas ref={canvas} className={`ink-canvas tool-${tool.type}`} aria-label={`Drawing surface, page ${pageNumber}`}
             onPointerDown={startGesture} onPointerMove={updateGesture} onPointerUp={(event) => finishGesture(event)}
             onPointerCancel={(event) => finishGesture(event, true)} onLostPointerCapture={(event) => finishGesture(event, true)} />

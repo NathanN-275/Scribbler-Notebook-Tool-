@@ -98,9 +98,6 @@ export async function renderPageBlob(note: Note, page: Page) {
       ctx.drawImage(image, (pageWidth - width) / 2, (pageHeight - height) / 2, width, height);
     } finally { URL.revokeObjectURL(url); }
   }
-  ctx.strokeStyle = "#b9c9c3";
-  ctx.lineWidth = 1;
-  [92, 132, 172].forEach((y) => { ctx.beginPath(); ctx.moveTo(74, y); ctx.lineTo(pageWidth - 74, y); ctx.stroke(); });
   page.strokes.forEach((stroke) => drawStroke(ctx, stroke, false));
   ctx.fillStyle = "#202b25";
   ctx.textBaseline = "top";
