@@ -10,7 +10,11 @@ export type Stroke = {
   width: number;
   points: Point[];
 };
-export type TextBox = { id: string; x: number; y: number; width: number; height: number; text: string };
+export type TextBox = {
+  id: string; x: number; y: number; width: number; height: number; text: string;
+  rotation?: number;
+  textScale?: number;
+};
 export type Page = { id: string; strokes: Stroke[]; textBoxes: TextBox[]; background?: Blob };
 export type Note = {
   id: string;

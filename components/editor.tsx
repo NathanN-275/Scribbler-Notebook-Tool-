@@ -6,6 +6,7 @@ import { BookOpen, Check, ChevronLeft, ChevronRight, Download, Eraser, FileText,
 import { defaultEditorSettings, newPage, nextUntitledNoteName, readEditorSettings, readLibrary, readNote, saveEditorSettings, saveNote, type EditorSettings, type Note, type Page } from "../lib/notebooks";
 import { downloadBlob, makePdf, prepareFilePages, renderPageBlob } from "../lib/files";
 import { InkCanvas, type DrawingTool } from "./ink-canvas";
+import type { PageItems } from "../lib/selection";
 import { InkPalette } from "./ink-palette";
 import { PaperControls, PaperPreview } from "./paper-controls";
 
@@ -80,6 +81,7 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   const [loadRequest, setLoadRequest] = useState(0);
   const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "error">("saved");
   const [pageIndex, setPageIndex] = useState(0);
+  const [clipboard, setClipboard] = useState<PageItems>();
   const [tool, setTool] = useState<Tool>("pen");
   const [inkColors, setInkColors] = useState({ pen: colors[0].value, pencil: colors[0].value });
   const [settings, setSettings] = useState(defaultEditorSettings);
@@ -413,7 +415,8 @@ export function NoteEditor({ noteId }: { noteId: string }) {
     </div>}
     <div className="editor-body">
       <main className="editor-workspace">
-        <InkCanvas key={page.id} page={page} pageNumber={pageIndex + 1} paper={note.paper} paperSpacing={note.paperSpacing} tool={drawingTool} zoom={zoom} onEdit={editPage} />
+        <InkCanvas key={page.id} page={page} pageNumber={pageIndex + 1} paper={note.paper} paperSpacing={note.paperSpacing}
+          tool={drawingTool} zoom={zoom} clipboard={clipboard} onCopy={setClipboard} onEdit={editPage} />
         <nav className="editor-pagination" aria-label="Note pages">
           <ToolButton label="Previous page" disabled={pageIndex === 0} onClick={() => setPageIndex(pageIndex - 1)}><ChevronLeft size={20} /></ToolButton>
           <span aria-live="polite">Page {pageIndex + 1} of {note.pages.length}</span>

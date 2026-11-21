@@ -2,6 +2,7 @@ import { PDFDocument } from "pdf-lib";
 import { drawStroke, pageHeight, pageWidth } from "./ink";
 import type { Note, Page, PaperType } from "./notebooks";
 import { paperPatternGap, paperSpacingFactor } from "./paper";
+import { boxCenter } from "./selection";
 
 export const maxUploadBytes = 20 * 1024 * 1024;
 
@@ -102,21 +103,34 @@ export async function renderPageBlob(note: Note, page: Page) {
   [92, 132, 172].forEach((y) => { ctx.beginPath(); ctx.moveTo(74, y); ctx.lineTo(pageWidth - 74, y); ctx.stroke(); });
   page.strokes.forEach((stroke) => drawStroke(ctx, stroke, false));
   ctx.fillStyle = "#202b25";
-  ctx.font = "19px Arial, sans-serif";
   ctx.textBaseline = "top";
   page.textBoxes.forEach((box) => {
+    if (!box.text.trim()) return;
+    const center = boxCenter(box);
+    const scale = box.textScale ?? 1;
+    const padding = 7 * scale;
+    const textWidth = box.width - 2 * padding;
+    if (textWidth <= 0) return;
+    ctx.save();
+    ctx.translate(center.x, center.y);
+    ctx.rotate(box.rotation ?? 0);
+    ctx.beginPath();
+    ctx.rect(-box.width / 2, -box.height / 2, box.width, box.height);
+    ctx.clip();
+    ctx.font = `${19 * scale}px Arial, sans-serif`;
     const lines = box.text.split("\n").flatMap((paragraph) => {
       const wrapped: string[] = [];
       let line = "";
       for (const word of paragraph.split(/\s+/)) {
         const candidate = line ? `${line} ${word}` : word;
-        if (line && ctx.measureText(candidate).width > box.width - 14) { wrapped.push(line); line = word; }
+        if (line && ctx.measureText(candidate).width > textWidth) { wrapped.push(line); line = word; }
         else line = candidate;
       }
       wrapped.push(line);
       return wrapped;
     });
-    lines.forEach((line, index) => ctx.fillText(line, box.x + 7, box.y + 7 + index * 24, box.width - 14));
+    lines.forEach((line, index) => ctx.fillText(line, -box.width / 2 + padding, -box.height / 2 + padding + index * 24 * scale, textWidth));
+    ctx.restore();
   });
   return blobFromCanvas(canvas);
 }
