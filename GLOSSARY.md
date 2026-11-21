@@ -41,3 +41,11 @@ A tool that lets users drag the page around without drawing a stroke.
 **Lasso selection**:
 A selection made by drawing a freeform boundary; any overlapping strokes or text boxes can be moved or deleted.
 _Avoid_: Scissor selection
+
+## Data safety
+
+**Backup archive**:
+A single file containing a copy of the browser library, including folders, notes, pages, imported page backgrounds, and editor settings.
+
+**Restore conflict**:
+A note with the same identity in the current library and a backup, but different contents. The user chooses whether to keep the local note, replace it, or keep both.
