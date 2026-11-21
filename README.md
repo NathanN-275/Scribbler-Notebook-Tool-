@@ -4,7 +4,7 @@
 
 ![Scribbler homepage with a preview of handwritten calculus notes on graph paper](docs/images/scribbler-home.png)
 
-Scribbler is a browser notebook for handwritten notes and study. Create a folder or note from the library, choose a paper type and spacing, and open the editor. Notes save automatically in the current browser. The editor supports ink, text boxes, page thumbnails, page reordering, duplication and deletion with undo, local page imports, and PDF export. The library can also export and restore a full Scribbler backup. The AI tutor panel previews a future AWS integration.
+Scribbler is a browser notebook for handwritten notes and study. Create and organize folders and notes from the library, search and sort your notes, and move them with drag-and-drop or bulk actions. Notes save automatically in the current browser; deleted notes remain recoverable in Trash until you empty it. The editor supports ink, text boxes, page thumbnails, page reordering, duplication and deletion with undo, local page imports, and PDF export. The library can export and restore a full Scribbler backup, including Trash. The AI tutor panel previews a future AWS integration.
 
 ## Run locally
 

@@ -9,12 +9,14 @@ export type LibraryBackup = {
   createdAt: string;
   folders: Folder[];
   notes: BackupNote[];
+  trash?: Array<{ id: string; deletedAt: number; note: BackupNote }>;
   editorSettings: EditorSettings;
 };
 export type RestoreChoice = "local" | "backup" | "both";
 export type RestorePreview = {
   backup: LibraryBackup;
   additions: number;
+  trashAdditions: number;
   exactDuplicates: number;
   exactDuplicateIds: string[];
   conflicts: Array<{ id: string; name: string }>;
@@ -72,7 +74,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function validateBackup(value: unknown): LibraryBackup {
   if (!isRecord(value) || value.format !== "scribbler-backup" || value.version !== 1 || typeof value.backupId !== "string" ||
-    !Array.isArray(value.folders) || !Array.isArray(value.notes) || !isRecord(value.editorSettings)) {
+    !Array.isArray(value.folders) || !Array.isArray(value.notes) || (value.trash !== undefined && !Array.isArray(value.trash)) || !isRecord(value.editorSettings)) {
     throw new Error("This file is not a supported Scribbler backup.");
   }
   if (!value.folders.every((item) => isRecord(item) && typeof item.id === "string" && typeof item.name === "string" && typeof item.createdAt === "number")) {
@@ -83,6 +85,10 @@ function validateBackup(value: unknown): LibraryBackup {
       (page.background === undefined || typeof page.background === "string")))) {
     throw new Error("A note or page in this backup is invalid.");
   }
+  if (value.trash && !value.trash.every((entry) => isRecord(entry) && typeof entry.id === "string" && typeof entry.deletedAt === "number" &&
+    isRecord(entry.note) && typeof entry.note.id === "string" && typeof entry.note.name === "string" && Array.isArray(entry.note.pages))) {
+    throw new Error("A trashed note in this backup is invalid.");
+  }
   const settings = { ...defaultEditorSettings, ...value.editorSettings, id: "editor" as const };
   return {
     format: "scribbler-backup",
@@ -91,6 +97,7 @@ function validateBackup(value: unknown): LibraryBackup {
     createdAt: typeof value.createdAt === "string" ? value.createdAt : new Date().toISOString(),
     folders: value.folders as Folder[],
     notes: value.notes as BackupNote[],
+    trash: (value.trash ?? []) as Array<{ id: string; deletedAt: number; note: BackupNote }>,
     editorSettings: settings,
   };
 }
@@ -117,6 +124,7 @@ export async function createLibraryBackup(library: Library, editorSettings: Edit
     createdAt: new Date().toISOString(),
     folders: library.folders,
     notes: await Promise.all(library.notes.map(encodeNote)),
+    trash: await Promise.all(library.trash.map(async (entry) => ({ ...entry, note: await encodeNote(entry.note) }))),
     editorSettings,
   };
   return new Blob([JSON.stringify(backup)], { type: "application/vnd.scribbler.backup+json" });
@@ -131,6 +139,7 @@ export async function inspectLibraryBackup(file: File, library: Library): Promis
   }
   const backup = validateBackup(decoded);
   const currentById = new Map(library.notes.map((note) => [note.id, note]));
+  const currentTrashById = new Map(library.trash.map((entry) => [entry.id, entry]));
   const conflicts: RestorePreview["conflicts"] = [];
   const exactDuplicateIds: string[] = [];
   let additions = 0;
@@ -149,10 +158,16 @@ export async function inspectLibraryBackup(file: File, library: Library): Promis
       else conflicts.push({ id: note.id, name: note.name });
       continue;
     }
+    if (currentTrashById.has(note.id)) {
+      conflicts.push({ id: note.id, name: note.name });
+      continue;
+    }
     if (archivedCopies.length) conflicts.push({ id: note.id, name: note.name });
     else additions += 1;
   }
-  return { backup, additions, exactDuplicates, exactDuplicateIds, conflicts };
+  const currentTrashIds = new Set(library.trash.map((entry) => entry.id));
+  const trashAdditions = (backup.trash ?? []).filter((entry) => !currentTrashIds.has(entry.id) && !currentById.has(entry.id)).length;
+  return { backup, additions, trashAdditions, exactDuplicates, exactDuplicateIds, conflicts };
 }
 
 function cloneWithNewIds(note: Note): Note {
@@ -175,27 +190,31 @@ export async function restoreLibraryBackup(
   restoreEditorSettings: boolean,
 ) {
   const imported = await Promise.all(preview.backup.notes.map(decodeNote));
+  const importedTrash = await Promise.all((preview.backup.trash ?? []).map(async (entry) => ({ ...entry, note: await decodeNote(entry.note) })));
   const importedById = new Map(imported.map((note) => [note.id, note]));
   const exactIds = new Set(preview.exactDuplicateIds);
   const conflictIds = new Set(preview.conflicts.map(({ id }) => id));
 
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open("scribbler", 2);
+    const request = indexedDB.open("scribbler", 3);
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
   try {
     await new Promise<void>((resolve, reject) => {
-      const stores = restoreEditorSettings ? ["folders", "notes", "settings"] : ["folders", "notes"];
+      const stores = restoreEditorSettings ? ["folders", "notes", "trash", "settings"] : ["folders", "notes", "trash"];
       const transaction = db.transaction(stores, "readwrite");
       const folderStore = transaction.objectStore("folders");
       const noteStore = transaction.objectStore("notes");
+      const trashStore = transaction.objectStore("trash");
       const localFolderIds = new Set<string>();
       const localNoteIds = new Set<string>();
+      const localTrashIds = new Set<string>();
       let foldersRead = false;
       let notesRead = false;
+      let trashRead = false;
       const writeWhenReady = () => {
-        if (!foldersRead || !notesRead) return;
+        if (!foldersRead || !notesRead || !trashRead) return;
         for (const folder of preview.backup.folders) {
           if (!localFolderIds.has(folder.id)) folderStore.put(folder);
         }
@@ -206,8 +225,17 @@ export async function restoreLibraryBackup(
           }
           if (exactIds.has(note.id)) continue;
           const choice = choices[note.id];
-          if (choice === "backup") noteStore.put(note);
+          if (choice === "backup") {
+            noteStore.put(note);
+            if (localTrashIds.has(note.id)) trashStore.delete(note.id);
+          }
           else if (choice === "both") noteStore.put(cloneWithNewIds(note));
+        }
+        for (const entry of importedTrash) {
+          if (!localNoteIds.has(entry.id) && !importedById.has(entry.id) && !localTrashIds.has(entry.id)) {
+            trashStore.put(entry);
+            localTrashIds.add(entry.id);
+          }
         }
         if (restoreEditorSettings) transaction.objectStore("settings").put({ ...preview.backup.editorSettings, id: "editor" });
       };
@@ -215,6 +243,8 @@ export async function restoreLibraryBackup(
       folderRequest.onsuccess = () => { folderRequest.result.forEach((id) => localFolderIds.add(String(id))); foldersRead = true; writeWhenReady(); };
       const noteRequest = noteStore.getAllKeys();
       noteRequest.onsuccess = () => { noteRequest.result.forEach((id) => localNoteIds.add(String(id))); notesRead = true; writeWhenReady(); };
+      const trashRequest = trashStore.getAllKeys();
+      trashRequest.onsuccess = () => { trashRequest.result.forEach((id) => localTrashIds.add(String(id))); trashRead = true; writeWhenReady(); };
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error ?? new Error("Couldn’t restore this backup."));
       transaction.onabort = () => reject(transaction.error ?? new Error("Couldn’t restore this backup."));

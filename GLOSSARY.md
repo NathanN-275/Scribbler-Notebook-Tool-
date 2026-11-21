@@ -22,6 +22,15 @@ A small preview of a page used to select and navigate between pages in a note.
 **Duplicated page**:
 A new page that starts with the selected page's writing, text boxes, and imported background, while keeping its own page identity.
 
+**Library view**:
+A filterable way to browse all notes, study tags, study material, or Trash.
+
+**Trash**:
+A local holding area for deleted notes. Notes remain recoverable until the user empties Trash.
+
+**Unfiled note**:
+A note whose folder is set to `null`, shown in All notes outside a folder.
+
 **Paper type**:
 The visual guide shown behind the ink on a note's pages: plain, lined, graph, or dotted.
 _Avoid_: Template

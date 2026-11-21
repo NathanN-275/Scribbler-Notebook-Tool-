@@ -28,7 +28,8 @@ export type Note = {
   updatedAt: number;
 };
 export type Folder = { id: string; name: string; createdAt: number };
-export type Library = { folders: Folder[]; notes: Note[] };
+export type DeletedNote = { id: string; deletedAt: number; note: Note };
+export type Library = { folders: Folder[]; notes: Note[]; trash: DeletedNote[] };
 export type EraserMode = "stroke" | "point";
 export type EditorSettings = {
   id: "editor";
@@ -57,12 +58,13 @@ let connection: Promise<IDBDatabase> | undefined;
 
 function database() {
   connection ??= new Promise<IDBDatabase>((resolve, reject) => {
-    const open = indexedDB.open("scribbler", 2);
+    const open = indexedDB.open("scribbler", 3);
     open.onupgradeneeded = () => {
       const db = open.result;
       if (!db.objectStoreNames.contains("folders")) db.createObjectStore("folders", { keyPath: "id" });
       if (!db.objectStoreNames.contains("notes")) db.createObjectStore("notes", { keyPath: "id" });
       if (!db.objectStoreNames.contains("settings")) db.createObjectStore("settings", { keyPath: "id" });
+      if (!db.objectStoreNames.contains("trash")) db.createObjectStore("trash", { keyPath: "id" });
     };
     open.onerror = () => reject(open.error);
     open.onsuccess = () => {
@@ -89,14 +91,16 @@ function read<T>(request: IDBRequest<T>) {
 
 export async function readLibrary(): Promise<Library> {
   const db = await database();
-  const transaction = db.transaction(["folders", "notes"], "readonly");
-  const [folders, notes] = await Promise.all([
+  const transaction = db.transaction(["folders", "notes", "trash"], "readonly");
+  const [folders, notes, trash] = await Promise.all([
     read<Folder[]>(transaction.objectStore("folders").getAll()),
     read<Note[]>(transaction.objectStore("notes").getAll()),
+    read<DeletedNote[]>(transaction.objectStore("trash").getAll()),
   ]);
   return {
     folders: folders.sort((a, b) => a.name.localeCompare(b.name)),
     notes: notes.map(normalizeNote).sort((a, b) => b.createdAt - a.createdAt),
+    trash: trash.map((entry) => ({ ...entry, note: normalizeNote(entry.note) })).sort((a, b) => b.deletedAt - a.deletedAt),
   };
 }
 
@@ -139,6 +143,89 @@ export function nextUntitledNoteName(notes: Note[], date = new Date()) {
 
 export function saveFolder(folder: Folder) {
   return write("folders", folder);
+}
+
+export async function moveNotesToFolder(noteIds: string[], folderId: string | null) {
+  const db = await database();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction("notes", "readwrite");
+    const store = transaction.objectStore("notes");
+    const updatedAt = Date.now();
+    for (const id of new Set(noteIds)) {
+      const request = store.get(id);
+      request.onsuccess = () => {
+        if (request.result) store.put({ ...request.result, folderId, updatedAt });
+      };
+    }
+    transaction.oncomplete = () => resolve();
+    transaction.onabort = () => reject(transaction.error ?? new Error("Couldn’t move these notes."));
+    transaction.onerror = () => reject(transaction.error ?? new Error("Couldn’t move these notes."));
+  });
+}
+
+export async function deleteFolderAndUnfileNotes(folderId: string) {
+  const db = await database();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(["folders", "notes"], "readwrite");
+    const folderStore = transaction.objectStore("folders");
+    const noteStore = transaction.objectStore("notes");
+    const request = noteStore.getAll();
+    request.onsuccess = () => {
+      for (const note of request.result as Note[]) {
+        if (note.folderId === folderId) noteStore.put({ ...note, folderId: null, updatedAt: Date.now() });
+      }
+      folderStore.delete(folderId);
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onabort = () => reject(transaction.error ?? new Error("Couldn’t delete this folder."));
+    transaction.onerror = () => reject(transaction.error ?? new Error("Couldn’t delete this folder."));
+  });
+}
+
+export async function moveNoteToTrash(noteId: string) {
+  const db = await database();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(["notes", "trash"], "readwrite");
+    const noteStore = transaction.objectStore("notes");
+    const request = noteStore.get(noteId);
+    request.onsuccess = () => {
+      if (!request.result) { transaction.abort(); return; }
+      transaction.objectStore("trash").put({ id: noteId, deletedAt: Date.now(), note: request.result as Note });
+      noteStore.delete(noteId);
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onabort = () => reject(transaction.error ?? new Error("Couldn’t move this note to Trash."));
+    transaction.onerror = () => reject(transaction.error ?? new Error("Couldn’t move this note to Trash."));
+  });
+}
+
+export async function restoreTrashedNote(noteId: string) {
+  const db = await database();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(["notes", "trash"], "readwrite");
+    const trashStore = transaction.objectStore("trash");
+    const request = trashStore.get(noteId);
+    request.onsuccess = () => {
+      if (!request.result) { transaction.abort(); return; }
+      const entry = request.result as DeletedNote;
+      transaction.objectStore("notes").put(entry.note);
+      trashStore.delete(noteId);
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onabort = () => reject(transaction.error ?? new Error("Couldn’t restore this note."));
+    transaction.onerror = () => reject(transaction.error ?? new Error("Couldn’t restore this note."));
+  });
+}
+
+export async function emptyTrash() {
+  const db = await database();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction("trash", "readwrite");
+    transaction.objectStore("trash").clear();
+    transaction.oncomplete = () => resolve();
+    transaction.onabort = () => reject(transaction.error ?? new Error("Couldn’t empty Trash."));
+    transaction.onerror = () => reject(transaction.error ?? new Error("Couldn’t empty Trash."));
+  });
 }
 
 export function newPage(): Page {
