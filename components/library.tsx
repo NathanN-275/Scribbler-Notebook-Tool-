@@ -5,8 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BookOpen, ChevronRight, Folder, FolderOpen, FolderPlus, NotebookPen, Plus, X } from "lucide-react";
 import { Brand } from "./brand";
-import { newPage, nextUntitledNoteName, paperTypes, readLibrary, saveFolder, saveNote, type Library, type PaperType } from "../lib/notebooks";
-import { PaperPreview, PaperSpacingControl, paperStyle } from "./paper-controls";
+import { newPage, nextUntitledNoteName, readLibrary, saveFolder, saveNote, type Library, type PaperType } from "../lib/notebooks";
+import { standardPaperSpacing } from "../lib/paper";
+import { PaperControls, PaperPreview, paperStyle } from "./paper-controls";
 
 type CreateMode = "folder" | "note";
 
@@ -18,7 +19,7 @@ export function LibraryView() {
   const [request, setRequest] = useState(0);
   const [create, setCreate] = useState<CreateMode>();
   const [paper, setPaper] = useState<PaperType>("lined");
-  const [paperSpacing, setPaperSpacing] = useState(2);
+  const [paperSpacing, setPaperSpacing] = useState(standardPaperSpacing);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -39,7 +40,7 @@ export function LibraryView() {
   function showCreate(mode: CreateMode) {
     setCreateError(false);
     setPaper("lined");
-    setPaperSpacing(2);
+    setPaperSpacing(standardPaperSpacing);
     setCreate(mode);
   }
 
@@ -178,24 +179,9 @@ export function LibraryView() {
                   {library?.folders.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                 </select>
               </label>
-              <fieldset className="paper-field">
-                <legend>Paper type</legend>
-                <div className="paper-choices">
-                  {paperTypes.map((type) => (
-                    <label key={type} className="paper-option">
-                      <input type="radio" name="paper" value={type} checked={paper === type} onChange={() => setPaper(type)} />
-                      <PaperPreview paper={type} spacing={paperSpacing} />
-                      <span>{type}</span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-              {paper !== "plain" && <PaperSpacingControl value={paperSpacing} onChange={setPaperSpacing} />}
+              <PaperControls paper={paper} spacing={paperSpacing} onPaperChange={setPaper} onSpacingChange={setPaperSpacing} />
             </div>
-            <div className="create-note-preview">
-              <span>Preview</span>
-              <PaperPreview paper={paper} spacing={paperSpacing} className="large-paper-preview" />
-            </div>
+            <PaperPreview paper={paper} spacing={paperSpacing} />
           </div>}
           {createError && <p className="error-text" role="alert">Couldn’t save this {create}. Try again.</p>}
           <div className="dialog-actions">

@@ -1,6 +1,7 @@
 import { PDFDocument } from "pdf-lib";
 import { drawStroke, pageHeight, pageWidth } from "./ink";
 import type { Note, Page, PaperType } from "./notebooks";
+import { paperPatternGap, paperSpacingFactor } from "./paper";
 
 export const maxUploadBytes = 20 * 1024 * 1024;
 
@@ -59,7 +60,7 @@ function drawPaper(ctx: CanvasRenderingContext2D, paper: PaperType, spacing: num
   ctx.fillStyle = "#fffefa";
   ctx.fillRect(0, 0, pageWidth, pageHeight);
   if (paper === "plain") return;
-  const gap = 23 * [1.5, 1.25, 1, 0.8, 2 / 3][spacing];
+  const gap = paperPatternGap * paperSpacingFactor(spacing);
   ctx.strokeStyle = "#d9e2e1";
   ctx.fillStyle = "#a7b9b1";
   ctx.lineWidth = 1;

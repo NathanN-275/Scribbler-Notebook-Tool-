@@ -1,3 +1,5 @@
+import { standardPaperSpacing } from "./paper";
+
 export const paperTypes = ["plain", "lined", "graph", "dotted"] as const;
 export type PaperType = (typeof paperTypes)[number];
 export type Point = { x: number; y: number };
@@ -22,14 +24,14 @@ export type Note = {
 };
 export type Folder = { id: string; name: string; createdAt: number };
 export type Library = { folders: Folder[]; notes: Note[] };
-export type EditorSettings = { id: "editor"; customColors: string[]; penWidth: number; pencilWidth: number };
+export type EditorSettings = { id: "editor"; customColors: string[]; penWidth: number; pencilWidth: number; eraserRadius: number };
 
-const defaultSettings: EditorSettings = { id: "editor", customColors: [], penWidth: 4, pencilWidth: 2 };
+export const defaultEditorSettings: EditorSettings = { id: "editor", customColors: [], penWidth: 4, pencilWidth: 2, eraserRadius: 16 };
 
 function normalizeNote(note: Note): Note {
   return {
     ...note,
-    paperSpacing: note.paperSpacing ?? 2,
+    paperSpacing: note.paperSpacing ?? standardPaperSpacing,
     updatedAt: note.updatedAt ?? note.createdAt,
     pages: note.pages.map((page) => ({ ...page, textBoxes: page.textBoxes ?? [] })),
   };
@@ -105,7 +107,7 @@ export function saveNote(note: Note) {
 export async function readEditorSettings(): Promise<EditorSettings> {
   const db = await database();
   const settings = await read<EditorSettings | undefined>(db.transaction("settings").objectStore("settings").get("editor"));
-  return settings ?? defaultSettings;
+  return { ...defaultEditorSettings, ...settings };
 }
 
 export function saveEditorSettings(settings: EditorSettings) {

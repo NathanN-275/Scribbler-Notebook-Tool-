@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { BookOpen, Check, ChevronLeft, ChevronRight, Download, Eraser, FileText, Hand, Lasso, Pencil, PenTool, Plus, Redo2, Sparkles, Type, Undo2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
-import { newPage, nextUntitledNoteName, paperTypes, readEditorSettings, readLibrary, readNote, saveEditorSettings, saveNote, type EditorSettings, type Note, type Page, type PaperType } from "../lib/notebooks";
+import { BookOpen, Check, ChevronLeft, ChevronRight, Download, Eraser, FileText, Hand, Lasso, Pencil, PenTool, Plus, Redo2, Settings, Sparkles, Type, Undo2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
+import { defaultEditorSettings, newPage, nextUntitledNoteName, readEditorSettings, readLibrary, readNote, saveEditorSettings, saveNote, type EditorSettings, type Note, type Page } from "../lib/notebooks";
 import { downloadBlob, makePdf, prepareFilePages, renderPageBlob } from "../lib/files";
 import { InkCanvas, type DrawingTool } from "./ink-canvas";
-import { PaperSpacingControl } from "./paper-controls";
+import { PaperControls, PaperPreview } from "./paper-controls";
 
 const tools = [
   { id: "pan", label: "Pan", Icon: Hand },
@@ -27,8 +27,9 @@ const sizeLabels = ["Fine", "Medium", "Bold"];
 const sizeWidths = [2, 4, 8];
 const eraserRadii = [8, 16, 28];
 
-type Tool = (typeof tools)[number]["id"] | "eraser";
-type InkSettings = { color: string; width: number };
+type Tool = (typeof tools)[number]["id"];
+type SizedTool = "pen" | "pencil" | "eraser";
+type PaperSettings = Pick<Note, "paper" | "paperSpacing">;
 type PageSnapshot = Pick<Page, "strokes" | "textBoxes">;
 type History = { undo: PageSnapshot[]; redo: PageSnapshot[] };
 type PreparedPage = { id: string; filename: string; pageNumber: number; background: Blob };
@@ -71,20 +72,18 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "error">("saved");
   const [pageIndex, setPageIndex] = useState(0);
   const [tool, setTool] = useState<Tool>("pen");
-  const [inkSettings, setInkSettings] = useState<Record<"pen" | "pencil", InkSettings>>({
-    pen: { color: colors[0].value, width: 4 }, pencil: { color: colors[0].value, width: 2 },
-  });
-  const [settings, setSettings] = useState<EditorSettings>({ id: "editor", customColors: [], penWidth: 4, pencilWidth: 2 });
+  const [inkColors, setInkColors] = useState({ pen: colors[0].value, pencil: colors[0].value });
+  const [settings, setSettings] = useState(defaultEditorSettings);
   const [settingsError, setSettingsError] = useState(false);
-  const [widthSlider, setWidthSlider] = useState<"pen" | "pencil" | null>(null);
-  const [eraserSize, setEraserSize] = useState(1);
+  const [widthSlider, setWidthSlider] = useState<SizedTool | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [renameError, setRenameError] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
-  const [paperSpacing, setPaperSpacing] = useState(2);
+  const [paperDraft, setPaperDraft] = useState<PaperSettings>();
+  const [colorDraft, setColorDraft] = useState(colors[0].value);
   const [uploadPages, setUploadPages] = useState<PreparedPage[]>([]);
   const [uploadSelection, setUploadSelection] = useState<string[]>([]);
   const [uploadErrors, setUploadErrors] = useState<string[]>([]);
@@ -95,7 +94,8 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   const histories = useRef(new Map<string, History>());
   const latestSave = useRef(0);
   const noteRef = useRef<Note | null | undefined>(undefined);
-  const colorPicker = useRef<HTMLInputElement>(null);
+  const colorDialog = useRef<HTMLDialogElement>(null);
+  const paperDialog = useRef<HTMLDialogElement>(null);
   const uploadInput = useRef<HTMLInputElement>(null);
   const renameDialog = useRef<HTMLDialogElement>(null);
   const uploadDialog = useRef<HTMLDialogElement>(null);
@@ -103,10 +103,14 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   const page: Page | undefined = note?.pages[pageIndex];
   noteRef.current = note;
   const history = page && histories.current.get(page.id);
-  const ink = tool === "pen" || tool === "pencil" ? inkSettings[tool] : null;
+  const sizedTool = tool === "pen" || tool === "pencil" || tool === "eraser" ? tool : null;
+  const sizeKey = tool === "eraser" ? "eraserRadius" : tool === "pencil" ? "pencilWidth" : "penWidth";
+  const size = settings[sizeKey];
+  const presets = tool === "eraser" ? eraserRadii : sizeWidths;
+  const activePreset = presets.reduce((closest, preset) => Math.abs(preset - size) < Math.abs(closest - size) ? preset : closest);
   const drawingTool: DrawingTool = tool === "pen" || tool === "pencil"
-    ? { type: tool, color: inkSettings[tool].color, width: inkSettings[tool].width }
-    : tool === "eraser" ? { type: tool, radius: eraserRadii[eraserSize] }
+    ? { type: tool, color: inkColors[tool], width: size }
+    : tool === "eraser" ? { type: tool, radius: size }
       : { type: tool };
 
   useEffect(() => {
@@ -115,7 +119,6 @@ export function NoteEditor({ noteId }: { noteId: string }) {
     readEditorSettings().then((stored) => {
       if (!active) return;
       setSettings(stored);
-      setInkSettings((current) => ({ ...current, pen: { ...current.pen, width: stored.penWidth }, pencil: { ...current.pencil, width: stored.pencilWidth } }));
     }, () => { if (active) setSettingsError(true); });
     return () => { active = false; };
   }, [noteId, loadRequest]);
@@ -206,10 +209,25 @@ export function NoteEditor({ noteId }: { noteId: string }) {
     try { await saveEditorSettings(updated); } catch { setSettingsError(true); }
   }
 
-  function changeWidth(width: number) {
+  function submitColor(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     if (tool !== "pen" && tool !== "pencil") return;
-    setInkSettings((current) => ({ ...current, [tool]: { ...current[tool], width } }));
-    void saveSettings({ ...settings, [tool === "pen" ? "penWidth" : "pencilWidth"]: width });
+    const value = String(new FormData(event.currentTarget).get("color")).toLowerCase();
+    if (!colors.some((color) => color.value === value) && !settings.customColors.includes(value)) {
+      void saveSettings({ ...settings, customColors: [...settings.customColors, value] });
+    }
+    setInkColors((current) => ({ ...current, [tool]: value }));
+    colorDialog.current?.close();
+  }
+
+  function submitPaper(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const current = noteRef.current;
+    if (!current || !paperDraft) return;
+    if (paperDraft.paper !== current.paper || paperDraft.paperSpacing !== current.paperSpacing) {
+      void persist({ ...current, ...paperDraft }).catch(() => undefined);
+    }
+    paperDialog.current?.close();
   }
 
   async function submitRename(event: FormEvent<HTMLFormElement>) {
@@ -317,51 +335,50 @@ export function NoteEditor({ noteId }: { noteId: string }) {
       <div className="tool-group">
         {tools.map(({ id, label, Icon }) => <ToolButton key={id} label={label} active={tool === id} onClick={() => { setTool(id); setWidthSlider(null); }}><Icon size={20} /></ToolButton>)}
       </div>
-      {ink && (tool === "pen" || tool === "pencil") && <div className="tool-group swatches" role="group" aria-label={`${tool} colors`}>
-        {colors.map(({ name, value }) => <button type="button" className="swatch" key={value} aria-label={name} data-tooltip={name} aria-pressed={ink.color === value}
-          onClick={() => setInkSettings((current) => ({ ...current, [tool]: { ...current[tool], color: value } }))}><span style={{ backgroundColor: value }} /></button>)}
+      {(tool === "pen" || tool === "pencil") && <div className="tool-group swatches" role="group" aria-label={`${tool} colors`}>
+        {colors.map(({ name, value }) => <button type="button" className="swatch" key={value} aria-label={name} data-tooltip={name} aria-pressed={inkColors[tool] === value}
+          onClick={() => setInkColors((current) => ({ ...current, [tool]: value }))}><span style={{ backgroundColor: value }} /></button>)}
         {settings.customColors.map((value) => <span className="custom-swatch-wrap" key={value}>
-          <button type="button" className="swatch" aria-label={`Custom color ${value}`} data-tooltip={`Custom ${value}`} aria-pressed={ink.color === value}
-            onClick={() => setInkSettings((current) => ({ ...current, [tool]: { ...current[tool], color: value } }))}><span style={{ backgroundColor: value }} /></button>
+          <button type="button" className="swatch" aria-label={`Custom color ${value}`} data-tooltip={`Custom ${value}`} aria-pressed={inkColors[tool] === value}
+            onClick={() => setInkColors((current) => ({ ...current, [tool]: value }))}><span style={{ backgroundColor: value }} /></button>
           <button type="button" className="remove-swatch" aria-label={`Remove custom color ${value}`} onClick={() => {
             void saveSettings({ ...settings, customColors: settings.customColors.filter((color) => color !== value) });
-            if (ink.color === value) setInkSettings((current) => ({ ...current, [tool]: { ...current[tool], color: colors[0].value } }));
+            setInkColors((current) => ({
+              pen: current.pen === value ? colors[0].value : current.pen,
+              pencil: current.pencil === value ? colors[0].value : current.pencil,
+            }));
           }}><X size={11} /></button>
         </span>)}
-        <button type="button" className="swatch add-color" aria-label="Add custom color" data-tooltip="Add color" onClick={() => colorPicker.current?.click()}><Plus size={18} /></button>
-        <input ref={colorPicker} className="visually-hidden" type="color" aria-label="Choose custom color" onChange={(event) => {
-          const value = event.currentTarget.value.toLowerCase();
-          const next = { ...settings, customColors: settings.customColors.includes(value) ? settings.customColors : [...settings.customColors, value] };
-          void saveSettings(next);
-          if (tool === "pen" || tool === "pencil") setInkSettings((current) => ({ ...current, [tool]: { ...current[tool], color: value } }));
-        }} />
+        <button type="button" className="swatch add-color" aria-label="Add custom color" aria-haspopup="dialog" data-tooltip="Add color" onClick={() => {
+          setColorDraft(inkColors[tool]);
+          colorDialog.current?.showModal();
+        }}><Plus size={18} /></button>
       </div>}
-      {(ink || tool === "eraser") && <div className="tool-group size-buttons" role="group" aria-label={`${tool} sizes`}>
-        {(ink ? sizeLabels : sizeLabels).map((size, index) => {
-          const width = ink?.width ?? eraserRadii[eraserSize];
-          const active = ink ? width === sizeWidths[index] : eraserSize === index;
-          return <ToolButton key={size} label={`${size} ${tool}`} active={active} onClick={() => {
-            if (tool === "eraser") setEraserSize(index);
-            else if (ink) {
-              if (active && (tool === "pen" || tool === "pencil")) setWidthSlider(widthSlider === tool ? null : tool);
-              else { changeWidth(sizeWidths[index]); setWidthSlider(null); }
-            }
-          }}><span className="size-dot" style={{ width: 5 + index * 4, height: 5 + index * 4 }} /></ToolButton>;
-        })}
+      {sizedTool && <div className="tool-group size-buttons" role="group" aria-label={`${sizedTool} sizes`}>
+        {presets.map((preset, index) => <ToolButton key={preset} label={`${sizeLabels[index]} ${sizedTool}`} active={activePreset === preset} onClick={() => {
+          if (activePreset === preset) {
+            setWidthSlider(widthSlider === sizedTool ? null : sizedTool);
+          } else {
+            void saveSettings({ ...settings, [sizeKey]: preset });
+            setWidthSlider(null);
+          }
+        }}><span className="size-dot" style={{ width: 5 + index * 4, height: 5 + index * 4 }} /></ToolButton>)}
       </div>}
-      {ink && widthSlider === tool && <label className="width-slider">{ink.width}px
-        <input type="range" min="1" max="20" step="1" value={ink.width} aria-label={`${tool} width, ${ink.width} pixels`} onChange={(event) => changeWidth(Number(event.currentTarget.value))} />
+      {sizedTool && widthSlider === sizedTool && <label className="width-slider">{size}px
+        <input type="range" min={tool === "eraser" ? 8 : 1} max={tool === "eraser" ? 28 : 20} step="1" value={size}
+          aria-label={tool === "eraser" ? "Eraser size" : `${tool} width`} aria-valuetext={`${size} pixels`}
+          onChange={(event) => void saveSettings({ ...settings, [sizeKey]: event.currentTarget.valueAsNumber })} />
       </label>}
       <div className="tool-group history-buttons">
         <ToolButton label="Undo" disabled={!history?.undo.length} onClick={() => stepHistory("undo")}><Undo2 size={20} /></ToolButton>
         <ToolButton label="Redo" disabled={!history?.redo.length} onClick={() => stepHistory("redo")}><Redo2 size={20} /></ToolButton>
       </div>
-      <label className="paper-select"><span>Paper</span>
-        <select aria-label="Paper type for all pages" value={note.paper} onChange={(event) => void persist({ ...note, paper: event.currentTarget.value as PaperType }).catch(() => undefined)}>
-          {paperTypes.map((paperType) => <option key={paperType} value={paperType}>{paperType[0].toUpperCase() + paperType.slice(1)}</option>)}
-        </select>
-      </label>
-      {note.paper !== "plain" && <div className="paper-toolbar-spacing"><PaperSpacingControl value={note.paperSpacing} onChange={(value) => void persist({ ...note, paperSpacing: value }).catch(() => undefined)} /></div>}
+      <div className="tool-group">
+        <button type="button" className="editor-tool" aria-label="Paper settings" aria-haspopup="dialog" data-tooltip="Paper settings" onClick={() => {
+          setPaperDraft({ paper: note.paper, paperSpacing: note.paperSpacing });
+          paperDialog.current?.showModal();
+        }}><Settings size={20} /></button>
+      </div>
       <div className="zoom-controls" role="group" aria-label="Page zoom">
         <button type="button" aria-label="Zoom out" data-tooltip="Zoom out" disabled={zoom <= .5} onClick={() => setZoom((value) => Math.max(.5, Math.round((value - .1) * 10) / 10))}><ZoomOut size={19} /></button>
         <span>{Math.round(zoom * 100)}%</span>
@@ -390,6 +407,41 @@ export function NoteEditor({ noteId }: { noteId: string }) {
         <div className="ai-empty"><strong>Coming later</strong><p>The tutor will help you work through handwritten problems, get hints, and practice.</p></div>
       </aside>}
     </div>
+    <dialog ref={paperDialog} className="create-dialog create-note-dialog" aria-labelledby="paper-title">
+      <form onSubmit={submitPaper}>
+        <div className="dialog-header"><h2 id="paper-title">Paper settings</h2>
+          <button type="button" className="icon-button" aria-label="Close paper settings" onClick={() => paperDialog.current?.close()}><X size={21} /></button>
+        </div>
+        {paperDraft && <div className="create-note-layout">
+          <div className="create-note-options">
+            <PaperControls paper={paperDraft.paper} spacing={paperDraft.paperSpacing}
+              onPaperChange={(paper) => setPaperDraft({ ...paperDraft, paper })}
+              onSpacingChange={(paperSpacing) => setPaperDraft({ ...paperDraft, paperSpacing })} />
+          </div>
+          <PaperPreview paper={paperDraft.paper} spacing={paperDraft.paperSpacing} />
+        </div>}
+        <div className="dialog-actions">
+          <button type="button" className="button button-outline" onClick={() => paperDialog.current?.close()}>Cancel</button>
+          <button className="button button-primary">Save paper settings</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog ref={colorDialog} className="create-dialog color-dialog" aria-labelledby="color-title">
+      <form onSubmit={submitColor}>
+        <div className="dialog-header"><h2 id="color-title">Add custom color</h2>
+          <button type="button" className="icon-button" aria-label="Close color picker" onClick={() => colorDialog.current?.close()}><X size={21} /></button>
+        </div>
+        <div className="color-draft">
+          <label htmlFor="custom-color">Color</label>
+          <input id="custom-color" name="color" type="color" value={colorDraft} onInput={(event) => setColorDraft(event.currentTarget.value)} />
+          <span>{colorDraft}</span>
+        </div>
+        <div className="dialog-actions">
+          <button type="button" className="button button-outline" onClick={() => colorDialog.current?.close()}>Cancel</button>
+          <button className="button button-primary">Save color</button>
+        </div>
+      </form>
+    </dialog>
     <dialog ref={renameDialog} className="create-dialog rename-dialog" aria-labelledby="rename-title" onClose={() => setRenameOpen(false)}>
       <form onSubmit={submitRename}>
         <div className="dialog-header"><h2 id="rename-title">Note details</h2>
