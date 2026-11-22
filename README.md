@@ -25,6 +25,10 @@ Open [localhost:3000](http://localhost:3000). Use `npm run build` to create a pr
 
 Select the active Eraser again to choose between removing a whole stroke and erasing only the part you touch. Undo and redo apply to page edits on the current page and reset when the editor closes. Imported page images and tool settings are local to this browser profile and site address; they do not sync to other devices.
 
+## Organize your library
+
+Search notes by title within All notes or the open folder, and sort by creation date, last edit, or title. Use Move on a note to choose another folder or No folder. Open a folder to rename it. Delete asks for confirmation and permanently removes that note and its pages from this browser.
+
 ## Vercel
 
 Import the repository as a Next.js project. The frontend needs no environment variables. See [Next.js on Vercel](https://vercel.com/docs/frameworks/full-stack/nextjs).

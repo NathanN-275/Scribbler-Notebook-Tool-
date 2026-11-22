@@ -8,6 +8,8 @@ import { Brand } from "./brand";
 import { newPage, nextUntitledNoteName, readLibrary, saveFolder, saveNote, type Library, type PaperType } from "../lib/notebooks";
 import { standardPaperSpacing } from "../lib/paper";
 import { PaperControls, PaperPreview, paperStyle } from "./paper-controls";
+import { visibleNotes, type NoteSort } from "../lib/library-view";
+import { LibraryActionDialog, type LibraryAction } from "./library-action-dialog";
 
 type CreateMode = "folder" | "note";
 
@@ -24,18 +26,23 @@ export function LibraryView() {
   const [createError, setCreateError] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   const isSubmitting = useRef(false);
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<NoteSort>("created");
+  const [action, setAction] = useState<LibraryAction>();
+  const [status, setStatus] = useState("");
 
   useEffect(() => {
     let active = true;
     readLibrary().then(
-      (value) => { if (active) setLibrary(value); },
+      (value) => { if (active) { setLibrary(value); setLoadError(false); } },
       () => { if (active) setLoadError(true); },
     );
     return () => { active = false; };
   }, [request]);
 
   const folder = library?.folders.find((item) => item.id === folderId);
-  const notes = library?.notes.filter((note) => folder ? note.folderId === folder.id : true);
+  // Search and sorting only affect the view; saved notes keep their original data.
+  const notes = library && visibleNotes(library.notes, folder?.id ?? null, query, sort);
 
   function showCreate(mode: CreateMode) {
     setCreateError(false);
@@ -116,10 +123,22 @@ export function LibraryView() {
           <div className="library-title">
             <div><h1>{folder?.name ?? "Your library"}</h1><p>{folder ? "Notes in this folder." : "Create, organize, and revisit your notes."}</p></div>
             <div className="library-actions">
+              {folder && <button className="button button-outline" onClick={() => setAction({ type: "rename", folder })}>Rename folder</button>}
               {!folder && <button className="button button-outline" disabled={!library} onClick={() => showCreate("folder")}><FolderPlus size={18} /> New folder</button>}
               <button className="button button-primary" disabled={!library} onClick={() => showCreate("note")}><Plus size={18} /> New note</button>
             </div>
           </div>
+          <div className="library-filters">
+            <label className="field">Search notes
+              <input type="search" placeholder="Search by title" value={query} onChange={(event) => setQuery(event.target.value)} />
+            </label>
+            <label className="field">Sort notes
+              <select value={sort} onChange={(event) => setSort(event.target.value as NoteSort)}>
+                <option value="created">Newest created</option><option value="edited">Recently edited</option><option value="title">Title A–Z</option>
+              </select>
+            </label>
+          </div>
+          <p className="library-status" role="status">{status}</p>
           {loadError ? (
             <div className="state-box" role="alert"><p>Couldn’t open your library. Make sure browser storage is available.</p>
               <button className="button button-outline" onClick={() => { setLoadError(false); setRequest(request + 1); }}>Retry</button>
@@ -141,18 +160,26 @@ export function LibraryView() {
                 {notes?.length ? (
                   <div className="note-grid">
                     {notes.map((note) => (
-                      <Link className="note-card" key={note.id} href={`/notes/${note.id}`}>
+                      <article className="note-card" key={note.id}>
+                        {/* Keep action buttons outside the link so they never open the editor. */}
+                        <Link className="note-open" href={`/notes/${note.id}`}>
                         <div className="note-cover"><div className={`paper-sample ${note.paper}`} style={paperStyle(note.paperSpacing)}><NotebookPen size={26} /></div></div>
                         <div className="note-info"><strong>{note.name}</strong><span>{note.paper} · {note.pages.length} {note.pages.length === 1 ? "page" : "pages"}</span></div>
-                      </Link>
+                        </Link>
+                        <div className="note-actions">
+                          <button type="button" aria-label={`Move ${note.name}`} onClick={() => setAction({ type: "move", note })}>Move</button>
+                          <button type="button" aria-label={`Delete ${note.name}`} onClick={() => setAction({ type: "delete", note })}>Delete</button>
+                        </div>
+                      </article>
                     ))}
                   </div>
                 ) : (
                   <div className="empty-library">
                     <span className="empty-icon"><NotebookPen size={30} /></span>
-                    <h3>No notes yet</h3>
-                    <p>Start with a blank page and make it yours.</p>
-                    <button className="button button-primary" onClick={() => showCreate("note")}><Plus size={18} /> Create a note</button>
+                    <h3>{query.trim() ? "No matching notes" : "No notes yet"}</h3>
+                    <p>{query.trim() ? "Try another title or clear your search." : "Start with a blank page and make it yours."}</p>
+                    {query.trim() ? <button className="button button-outline" onClick={() => setQuery("")}>Clear search</button> :
+                      <button className="button button-primary" onClick={() => showCreate("note")}><Plus size={18} /> Create a note</button>}
                   </div>
                 )}
               </section>
@@ -160,6 +187,8 @@ export function LibraryView() {
           )}
         </main>
       </div>
+      {action && library && <LibraryActionDialog action={action} folders={library.folders} onClose={() => setAction(undefined)}
+        onSaved={(message) => { setStatus(message); setRequest((value) => value + 1); }} />}
       <dialog ref={dialog} className={create === "note" ? "create-dialog create-note-dialog" : "create-dialog"} aria-labelledby="create-title" onClose={() => setCreate(undefined)} onCancel={(event) => { if (creating) event.preventDefault(); }}>
         {create && <form onSubmit={submit}>
           <div className="dialog-header">

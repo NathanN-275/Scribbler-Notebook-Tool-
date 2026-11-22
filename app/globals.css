@@ -133,6 +133,18 @@ p { line-height: 1.65; }
 .folder-card span { flex: 1; overflow-wrap: anywhere; }
 .folder-card:hover, .note-card:hover { border-color: #98b4a1; }
 .note-card { display: block; overflow: hidden; background: var(--white); border: 1px solid var(--line); border-radius: 11px; }
+.note-open { display: block; }
+.note-actions { display: flex; gap: 8px; padding: 0 12px 12px; }
+.note-actions button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--white); font-size: .85rem; }
+.note-actions button:hover { background: #f1f3ec; }
+.note-actions button:last-child { color: #963b35; }
+.library-filters { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.library-filters .field { flex: 1 1 200px; margin: 0; }
+.library-filters .field:first-child { flex-grow: 3; }
+.library-status { color: var(--muted); margin-bottom: 16px; }
+.library-status:empty { display: none; }
+.button-danger { color: white; background: #963b35; border: 1px solid #963b35; }
+.note-open:focus-visible, .note-actions button:focus-visible { outline: 3px solid var(--green); outline-offset: -3px; }
 .note-cover { min-height: 106px; display: grid; place-items: center; background: #e8eee2; padding: 12px; }
 .note-cover .paper-sample { width: 62px; height: 78px; display: grid; place-items: center; transform: rotate(-5deg); color: var(--green); box-shadow: 0 3px 8px #193c3120; }
 .note-info { display: grid; gap: 4px; padding: 12px; }
