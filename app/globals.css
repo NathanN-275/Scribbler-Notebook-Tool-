@@ -202,6 +202,10 @@ p { line-height: 1.65; }
 .file-action { display: inline-flex; align-items: center; gap: 5px; min-height: 36px; padding: 6px 8px; border: 1px solid #688b7d; border-radius: 7px; background: #2b5948; color: #fff; font-size: .8rem; font-weight: 700; white-space: nowrap; }
 .file-action:hover { background: #386b57; }
 .editor-toolbar { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 4px 10px; padding: 7px 12px; border-bottom: 1px solid #d5ded3; background: var(--white); }
+.shape-picker { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px; font-size: .85rem; }
+.shape-picker select { padding: 6px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); background: var(--white); }
+.shape-hint { color: var(--muted); }
+.ink-canvas.tool-shape { cursor: crosshair; }
 .tool-group { display: flex; align-items: center; gap: 3px; }
 .tool-group + .tool-group { border-left: 1px solid var(--line); padding-left: 10px; }
 .editor-tool, .swatch { position: relative; display: inline-grid; place-items: center; width: 40px; height: 40px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--green); }

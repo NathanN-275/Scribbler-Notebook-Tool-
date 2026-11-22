@@ -6,9 +6,11 @@ import type { EraserMode, Page, PaperType, Point, Stroke, TextBox } from "../lib
 import { caughtByLasso, caughtPolygonByLasso, drawStroke, eraseStrokePoints, hitsStroke, pageHeight, pageWidth } from "../lib/ink";
 import { boxCenter, hitsTextBox, selectionBounds, selectionTransform, textBoxCorners, transformBox, transformStroke, transformTextBox, type Bounds, type PageItems, type SelectionTransform } from "../lib/selection";
 import { paperStyle } from "./paper-controls";
+import { shapePoints, type ShapeKind } from "../lib/shapes";
 
 export type DrawingTool =
   | { type: "pen" | "pencil"; color: string; width: number }
+  | { type: "shape"; kind: ShapeKind; color: string; width: number }
   | { type: "eraser"; radius: number; mode: EraserMode }
   | { type: "lasso" | "pan" | "text" };
 
@@ -20,6 +22,7 @@ type TransformGesture = {
 };
 type Gesture = { pointerId: number; last: Point } & (
   | { type: "draw"; stroke: Stroke }
+  | { type: "shape"; kind: ShapeKind; start: Point; stroke: Stroke }
   | EraseGesture
   | { type: "lasso"; boundary: Point[] }
   | TransformGesture
@@ -67,6 +70,7 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
   const [preview, setPreview] = useState<SelectionTransform>();
   const [focusedBoxId, setFocusedBoxId] = useState<string>();
   const selectable = tool.type === "lasso" || tool.type === "pan";
+  const activeShape = tool.type === "shape" ? tool.kind : undefined;
   const selection = useMemo(() => {
     const ids = new Set(selectable ? selectedIds : []);
     return {
@@ -170,6 +174,7 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
       drawStroke(ctx, displayed, selected.has(stroke.id));
     }
     if (current?.type === "draw") drawStroke(ctx, current.stroke, false);
+    if (current?.type === "shape") drawStroke(ctx, current.stroke, false);
     if (current?.type === "lasso") {
       ctx.beginPath();
       current.boundary.forEach((point, index) => index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y));
@@ -183,6 +188,25 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
       ctx.setLineDash([]);
     }
   }, [page, selected]);
+
+  useEffect(() => {
+    // A shape preview belongs to the current tool; switching tools discards it.
+    if (gesture.current?.type === "shape") {
+      gesture.current = null;
+      paint();
+    }
+  }, [tool.type, activeShape, paint]);
+
+  useEffect(() => {
+    function cancelShape(event: KeyboardEvent) {
+      if (event.key !== "Escape" || gesture.current?.type !== "shape") return;
+      event.preventDefault();
+      gesture.current = null;
+      paint();
+    }
+    window.addEventListener("keydown", cancelShape);
+    return () => window.removeEventListener("keydown", cancelShape);
+  }, [paint]);
 
   useLayoutEffect(() => {
     const element = canvas.current;
@@ -264,6 +288,10 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
     event.currentTarget.setPointerCapture(event.pointerId);
     if (tool.type === "pen" || tool.type === "pencil") {
       gesture.current = { ...base, type: "draw", stroke: { id: crypto.randomUUID(), tool: tool.type, color: tool.color, width: tool.width, points: [point] } };
+    } else if (tool.type === "shape") {
+      // Snapshot the style once, then keep the generated outline outside saved page data.
+      gesture.current = { ...base, type: "shape", kind: tool.kind, start: point,
+        stroke: { id: crypto.randomUUID(), tool: "pen", color: tool.color, width: tool.width, points: [] } };
     } else if (tool.type === "eraser") {
       const eraser = { ...base, type: "erase" as const, radius: tool.radius, mode: tool.mode, edits: new Map<string, Stroke[]>() };
       eraseBetween(point, point, eraser);
@@ -292,6 +320,7 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
     }
     if (point.x === current.last.x && point.y === current.last.y) return;
     if (current.type === "draw") current.stroke.points.push(point);
+    if (current.type === "shape") current.stroke.points = shapePoints(current.kind, current.start, point);
     if (current.type === "lasso") current.boundary.push(point);
     if (current.type === "erase") eraseBetween(current.last, point, current);
     if (current.type === "transform") {
@@ -320,6 +349,10 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
     if (current.type === "transform") setPreview(undefined);
     commitInkGesture(current, page.id, onEdit);
     if (!cancel) {
+      // Commit once on release so the whole shape takes one Undo and one save.
+      if (current.type === "shape" && current.stroke.points.length) {
+        onEdit(page.id, (page) => ({ ...page, strokes: [...page.strokes, current.stroke] }));
+      }
       if (current.type === "lasso" && current.boundary.length >= 3) {
         setSelectedIds([
           ...page.strokes.filter((stroke) => caughtByLasso(stroke, current.boundary)).map((stroke) => stroke.id),
