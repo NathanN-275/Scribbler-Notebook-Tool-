@@ -140,6 +140,76 @@ export function saveFolder(folder: Folder) {
   return write("folders", folder);
 }
 
+export async function moveNote(id: string, folderId: string | null) {
+  const db = await database();
+  return new Promise<void>((resolve, reject) => {
+    // Read and update together so moving a note preserves its latest page content.
+    const transaction = db.transaction(["notes", "folders"], "readwrite");
+    let failure: Error | undefined;
+    transaction.oncomplete = () => resolve();
+    transaction.onabort = () => reject(failure ?? transaction.error);
+    const notes = transaction.objectStore("notes");
+    const request = notes.get(id);
+    request.onsuccess = () => {
+      const note = request.result as Note | undefined;
+      if (!note) {
+        failure = new Error("This note no longer exists. Refresh the library.");
+        transaction.abort();
+        return;
+      }
+      const update = () => {
+        if (note.folderId !== folderId) notes.put({ ...note, folderId, updatedAt: Date.now() });
+      };
+      if (folderId === null) update();
+      else {
+        const folder = transaction.objectStore("folders").get(folderId);
+        folder.onsuccess = () => {
+          if (folder.result) update();
+          else {
+            failure = new Error("That folder no longer exists. Choose another folder.");
+            transaction.abort();
+          }
+        };
+      }
+    };
+  });
+}
+
+export async function renameFolder(id: string, enteredName: string) {
+  const name = enteredName.trim();
+  if (!name || name.length > 80) throw new Error("Enter a folder name between 1 and 80 characters.");
+  const db = await database();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction("folders", "readwrite");
+    let failure: Error | undefined;
+    transaction.oncomplete = () => resolve();
+    transaction.onabort = () => reject(failure ?? transaction.error);
+    const folders = transaction.objectStore("folders");
+    const request = folders.get(id);
+    request.onsuccess = () => {
+      const folder = request.result as Folder | undefined;
+      if (!folder) {
+        failure = new Error("This folder no longer exists. Refresh the library.");
+        transaction.abort();
+        return;
+      }
+      // Notes refer to the folder's ID, so only its display name needs to change.
+      if (folder.name !== name) folders.put({ ...folder, name });
+    };
+  });
+}
+
+export async function deleteNote(id: string) {
+  const db = await database();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction("notes", "readwrite");
+    // Report success after the deletion is committed, not just requested.
+    transaction.oncomplete = () => resolve();
+    transaction.onabort = () => reject(transaction.error);
+    transaction.objectStore("notes").delete(id);
+  });
+}
+
 export function newPage(): Page {
   return { id: crypto.randomUUID(), strokes: [], textBoxes: [] };
 }
