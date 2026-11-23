@@ -7,7 +7,8 @@ Build a browser-based note-taking frontend for the cloud computing class project
 ## Agreed scope
 
 - Landing page explains the note-taking product and its planned AI tutor, with a **Try the tool** button leading to the library.
-- The library shows a grid of flat folders and notes. Users can create folders and create notes with a name and paper type.
+- The library shows filterable All notes, Study tags, Study material, and Trash views. Users can search and sort notes, rename notes and folders, move notes by drag-and-drop or bulk selection, and move deleted notes to recoverable Trash.
+- Deleting a folder removes the folder and moves its notes to the unfiled All notes view. Trash keeps deleted notes and imported pages until the user empties it.
 - A note contains one or more pages. Users can add, navigate, reorder, duplicate, and delete pages from a thumbnail strip; each note always keeps at least one page.
 - Each note starts with lined, graph, or dotted paper. Users can change paper from inside the editor; the selected paper applies to all pages in that note.
 - The editor follows the reference screenshot's broad layout: top navigation and tool controls, a large paper canvas, compact page navigation, and Scribbler styling.
@@ -15,7 +16,7 @@ Build a browser-based note-taking frontend for the cloud computing class project
 - A toggleable AI panel appears as a nonfunctional placeholder. Live AI, handwriting recognition, and AWS integration are deferred.
 - Support mouse/trackpad and touch input.
 - Save changes automatically in the current browser using IndexedDB. No sign-in or cross-device sync.
-- Sharing and nested folders are deferred. PDF export and full-library backup/restore are available locally.
+- Sharing and nested folders are deferred. PDF export and full-library backup/restore, including Trash, are available locally.
 
 ## Recommended implementation
 
