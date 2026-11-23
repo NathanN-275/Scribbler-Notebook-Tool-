@@ -16,6 +16,17 @@ export type TextBox = {
   textScale?: number;
 };
 export type Page = { id: string; strokes: Stroke[]; textBoxes: TextBox[]; background?: Blob };
+export type StudyItem = {
+  id: string;
+  type: "flashcard" | "question";
+  pageId: string;
+  prompt: string;
+  answer: string;
+  createdAt: number;
+  againCount?: number;
+  gotItCount?: number;
+  lastReviewedAt?: number;
+};
 export type Note = {
   id: string;
   restoredFromId?: string;
@@ -24,6 +35,9 @@ export type Note = {
   paper: PaperType;
   paperSpacing: number;
   pages: Page[];
+  tags?: string[];
+  bookmarked?: boolean;
+  studyItems?: StudyItem[];
   createdAt: number;
   updatedAt: number;
 };
@@ -51,6 +65,9 @@ function normalizeNote(note: Note): Note {
     paperSpacing: note.paperSpacing ?? standardPaperSpacing,
     updatedAt: note.updatedAt ?? note.createdAt,
     pages: note.pages.map((page) => ({ ...page, textBoxes: page.textBoxes ?? [] })),
+    tags: Array.isArray(note.tags) ? [...new Set(note.tags.filter((tag) => typeof tag === "string" && tag.trim()).map((tag) => tag.trim()))] : [],
+    bookmarked: note.bookmarked === true,
+    studyItems: Array.isArray(note.studyItems) ? note.studyItems.map((item) => ({ againCount: 0, gotItCount: 0, ...item })) : [],
   };
 }
 

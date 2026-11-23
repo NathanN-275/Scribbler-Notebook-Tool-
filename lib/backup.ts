@@ -103,6 +103,7 @@ function validateBackup(value: unknown): LibraryBackup {
 }
 
 async function canonicalNote(note: Note | BackupNote) {
+  const pageIndexes = new Map(note.pages.map((page, index) => [page.id, index]));
   const encoded = await Promise.all(note.pages.map(async ({ id: _pageId, ...page }) => {
     const { background, ...content } = page;
     return {
@@ -113,7 +114,8 @@ async function canonicalNote(note: Note | BackupNote) {
     };
   }));
   const { id, restoredFromId, ...content } = note as Note;
-  return JSON.stringify({ ...content, id: restoredFromId ?? id, pages: encoded });
+  const studyItems = (note.studyItems ?? []).map(({ id: _itemId, pageId, ...item }) => ({ ...item, pageId: `page-${pageIndexes.get(pageId) ?? pageId}` }));
+  return JSON.stringify({ ...content, id: restoredFromId ?? id, tags: note.tags ?? [], bookmarked: note.bookmarked ?? false, studyItems, pages: encoded });
 }
 
 export async function createLibraryBackup(library: Library, editorSettings: EditorSettings): Promise<Blob> {
@@ -171,16 +173,18 @@ export async function inspectLibraryBackup(file: File, library: Library): Promis
 }
 
 function cloneWithNewIds(note: Note): Note {
+  const pageIds = new Map(note.pages.map((page) => [page.id, crypto.randomUUID()]));
   return {
     ...note,
     id: crypto.randomUUID(),
     restoredFromId: note.id,
     pages: note.pages.map((page) => ({
       ...page,
-      id: crypto.randomUUID(),
+      id: pageIds.get(page.id)!,
       strokes: page.strokes.map((stroke) => ({ ...stroke, id: crypto.randomUUID() })),
       textBoxes: page.textBoxes.map((box) => ({ ...box, id: crypto.randomUUID() })),
     })),
+    studyItems: note.studyItems?.map((item) => ({ ...item, id: crypto.randomUUID(), pageId: pageIds.get(item.pageId) ?? item.pageId })),
   };
 }
 

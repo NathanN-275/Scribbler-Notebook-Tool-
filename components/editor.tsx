@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { BookOpen, Check, ChevronLeft, ChevronRight, Copy, Download, Eraser, FileText, Hand, Lasso, Pencil, PenTool, Plus, Redo2, Settings, Sparkles, Trash2, Type, Undo2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
-import { defaultEditorSettings, newPage, nextUntitledNoteName, readEditorSettings, readLibrary, readNote, saveEditorSettings, saveNote, type EditorSettings, type Note, type Page } from "../lib/notebooks";
+import { BookOpen, Bookmark, BookMarked, Check, ChevronLeft, ChevronRight, Copy, Download, Eraser, FileText, Hand, Lasso, Pencil, PenTool, Plus, Redo2, Settings, Sparkles, Trash2, Type, Undo2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
+import { defaultEditorSettings, newPage, nextUntitledNoteName, readEditorSettings, readLibrary, readNote, saveEditorSettings, saveNote, type EditorSettings, type Note, type Page, type StudyItem } from "../lib/notebooks";
 import { downloadBlob, makePdf, prepareFilePages, renderPageBlob } from "../lib/files";
 import { InkCanvas, type DrawingTool } from "./ink-canvas";
 import type { PageItems } from "../lib/selection";
@@ -101,6 +101,11 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   const [exportSelection, setExportSelection] = useState<string[]>([]);
   const [exportBusy, setExportBusy] = useState(false);
   const [fileActionError, setFileActionError] = useState("");
+  const [studyItemOpen, setStudyItemOpen] = useState(false);
+  const [studyItemType, setStudyItemType] = useState<StudyItem["type"]>("flashcard");
+  const [studyPrompt, setStudyPrompt] = useState("");
+  const [studyAnswer, setStudyAnswer] = useState("");
+  const [studyItemError, setStudyItemError] = useState("");
   const [pageToDelete, setPageToDelete] = useState<string>();
   const [deletedPage, setDeletedPage] = useState<{ page: Page; index: number }>();
   const [draggedPageId, setDraggedPageId] = useState<string>();
@@ -114,6 +119,7 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   const uploadDialog = useRef<HTMLDialogElement>(null);
   const exportDialog = useRef<HTMLDialogElement>(null);
   const deletePageDialog = useRef<HTMLDialogElement>(null);
+  const studyItemDialog = useRef<HTMLDialogElement>(null);
   const undoPageTimer = useRef<number | undefined>(undefined);
   const page: Page | undefined = note?.pages[pageIndex];
   noteRef.current = note;
@@ -132,7 +138,13 @@ export function NoteEditor({ noteId }: { noteId: string }) {
 
   useEffect(() => {
     let active = true;
-    readNote(noteId).then((stored) => { if (active) setNote(stored ?? null); }, () => { if (active) setLoadError(true); });
+    readNote(noteId).then((stored) => {
+      if (!active) return;
+      setNote(stored ?? null);
+      const pageId = new URLSearchParams(window.location.search).get("page");
+      const linkedPageIndex = stored?.pages.findIndex((item) => item.id === pageId) ?? -1;
+      setPageIndex(linkedPageIndex >= 0 ? linkedPageIndex : 0);
+    }, () => { if (active) setLoadError(true); });
     readEditorSettings().then((stored) => {
       if (!active) return;
       setSettings(stored);
@@ -164,6 +176,10 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   }, [pageToDelete]);
 
   useEffect(() => () => window.clearTimeout(undoPageTimer.current), []);
+
+  useEffect(() => {
+    if (studyItemOpen && studyItemDialog.current && !studyItemDialog.current.open) studyItemDialog.current.showModal();
+  }, [studyItemOpen]);
 
   useEffect(() => {
     if (saveStatus === "saved") return;
@@ -227,6 +243,31 @@ export function NoteEditor({ noteId }: { noteId: string }) {
     if (!note) return;
     const pageItem = newPage();
     void persist({ ...note, pages: [...note.pages, pageItem] }).then(() => setPageIndex(note.pages.length)).catch(() => undefined);
+  }
+
+  function openStudyItem() {
+    setStudyItemType("flashcard");
+    setStudyPrompt("");
+    setStudyAnswer("");
+    setStudyItemError("");
+    setStudyItemOpen(true);
+  }
+
+  async function submitStudyItem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!note || !page) return;
+    const prompt = studyPrompt.trim();
+    const answer = studyAnswer.trim();
+    if (!prompt || !answer) { setStudyItemError("Add both sides before saving."); return; }
+    const item: StudyItem = { id: crypto.randomUUID(), type: studyItemType, pageId: page.id, prompt, answer, createdAt: Date.now(), againCount: 0, gotItCount: 0 };
+    setStudyItemError("");
+    try {
+      await persist({ ...note, studyItems: [...(note.studyItems ?? []), item] });
+      studyItemDialog.current?.close();
+      setStudyItemOpen(false);
+    } catch {
+      setStudyItemError("Couldn’t save this study item. Keep this note open and try again.");
+    }
   }
 
   function reorderPages(sourceId: string, targetId: string) {
@@ -425,6 +466,7 @@ export function NoteEditor({ noteId }: { noteId: string }) {
       </button>
       <div className="editor-top-actions">
         <span className="save-indicator" role="status">{saveStatus === "saved" ? <><Check size={15} /><span>Saved</span></> : saveStatus === "saving" ? "Saving…" : "Unsaved"}</span>
+        <button type="button" className={note.bookmarked ? "file-action saved-bookmark" : "file-action"} aria-label={note.bookmarked ? "Remove note bookmark" : "Bookmark note"} aria-pressed={!!note.bookmarked} data-tooltip={note.bookmarked ? "Bookmarked" : "Bookmark note"} onClick={() => void persist({ ...note, bookmarked: !note.bookmarked })}><Bookmark size={17} fill={note.bookmarked ? "currentColor" : "none"} /></button>
         <button type="button" className="file-action" onClick={() => uploadInput.current?.click()} aria-label="Upload pages" data-tooltip="Upload"><Upload size={17} /><span>Upload</span></button>
         <button type="button" className="file-action" onClick={openExport} aria-label="Export PDF" data-tooltip="Export PDF"><Download size={17} /><span>Export</span></button>
         <input ref={uploadInput} hidden type="file" multiple accept=".pdf,.docx,.png,.jpg,.jpeg,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg"
@@ -515,6 +557,7 @@ export function NoteEditor({ noteId }: { noteId: string }) {
           <ToolButton label="Next page" disabled={pageIndex + 1 === note.pages.length} onClick={() => setPageIndex(pageIndex + 1)}><ChevronRight size={20} /></ToolButton>
           <button type="button" className="page-action" onClick={duplicatePage}><Copy size={16} /> Duplicate</button>
           <button type="button" className="page-action page-delete-action" disabled={note.pages.length <= 1} onClick={() => setPageToDelete(page.id)}><Trash2 size={16} /> Delete</button>
+          <button type="button" className="page-action" onClick={openStudyItem}><BookMarked size={16} /> Add study item{note.studyItems?.filter((item) => item.pageId === page.id).length ? ` (${note.studyItems.filter((item) => item.pageId === page.id).length})` : ""}</button>
           <button type="button" className="add-page" onClick={addPage}><Plus size={18} /> Add page</button>
         </nav>
       </main>
@@ -542,6 +585,20 @@ export function NoteEditor({ noteId }: { noteId: string }) {
           <button type="button" className="button button-outline" onClick={() => paperDialog.current?.close()}>Cancel</button>
           <button className="button button-primary">Save paper settings</button>
         </div>
+      </form>
+    </dialog>
+    <dialog ref={studyItemDialog} className="create-dialog study-item-dialog" aria-labelledby="study-item-title" onClose={() => setStudyItemOpen(false)}>
+      <form onSubmit={(event) => void submitStudyItem(event)}>
+        <div className="dialog-header"><div><h2 id="study-item-title">Add study item</h2><p>Linked to page {pageIndex + 1} of “{note.name}”.</p></div>
+          <button type="button" className="icon-button" aria-label="Close" onClick={() => studyItemDialog.current?.close()}><X size={21} /></button></div>
+        <label className="field">Type
+          <select value={studyItemType} onChange={(event) => setStudyItemType(event.currentTarget.value as StudyItem["type"])}><option value="flashcard">Flashcard</option><option value="question">Practice question</option></select>
+        </label>
+        <label className="field">{studyItemType === "flashcard" ? "Front" : "Question"}<textarea value={studyPrompt} rows={3} maxLength={1200} required onChange={(event) => setStudyPrompt(event.currentTarget.value)} placeholder={studyItemType === "flashcard" ? "Term, idea, or prompt" : "Write a short-answer practice question"} /></label>
+        <label className="field">{studyItemType === "flashcard" ? "Back" : "Answer"}<textarea value={studyAnswer} rows={3} maxLength={2400} required onChange={(event) => setStudyAnswer(event.currentTarget.value)} placeholder={studyItemType === "flashcard" ? "Definition or explanation" : "Write the answer you want to practice"} /></label>
+        <button type="button" className="button button-outline ai-draft-placeholder" disabled title="AI drafting is planned for a later update"><Sparkles size={16} /> Draft with AI · coming soon</button>
+        {studyItemError && <p className="error-text" role="alert">{studyItemError}</p>}
+        <div className="dialog-actions"><button type="button" className="button button-outline" onClick={() => studyItemDialog.current?.close()}>Cancel</button><button className="button button-primary">Save study item</button></div>
       </form>
     </dialog>
     <dialog ref={deletePageDialog} className="create-dialog" aria-labelledby="delete-page-title" onClose={() => setPageToDelete(undefined)}>

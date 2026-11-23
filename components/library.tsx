@@ -3,9 +3,9 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Archive, BookOpen, ChevronRight, Download, Folder, FolderOpen, FolderPlus, GripVertical, NotebookPen, Pencil, Plus, Search, Tag, Trash2, Upload, X } from "lucide-react";
+import { Archive, BookOpen, Bookmark, ChevronRight, Download, Folder, FolderOpen, FolderPlus, GripVertical, NotebookPen, Pencil, Plus, Search, Sparkles, Tag, Trash2, Upload, X } from "lucide-react";
 import { Brand } from "./brand";
-import { deleteFolderAndUnfileNotes, emptyTrash, moveNoteToTrash, moveNotesToFolder, newPage, nextUntitledNoteName, readEditorSettings, readLibrary, restoreTrashedNote, saveFolder, saveNote, type Library, type PaperType } from "../lib/notebooks";
+import { deleteFolderAndUnfileNotes, emptyTrash, moveNoteToTrash, moveNotesToFolder, newPage, nextUntitledNoteName, readEditorSettings, readLibrary, restoreTrashedNote, saveFolder, saveNote, type Library, type Note, type PaperType, type StudyItem } from "../lib/notebooks";
 import { standardPaperSpacing } from "../lib/paper";
 import { PaperControls, PaperPreview, paperStyle } from "./paper-controls";
 import { createLibraryBackup, inspectLibraryBackup, restoreLibraryBackup, type RestoreChoice, type RestorePreview } from "../lib/backup";
@@ -14,7 +14,8 @@ import { downloadBlob } from "../lib/files";
 type CreateMode = "folder" | "note";
 type LibraryViewMode = "all" | "tags" | "study" | "trash";
 type SortMode = "recent" | "name";
-type ManageDialog = { kind: "rename-note" | "rename-folder"; id: string } | { kind: "delete-note" | "delete-folder"; id: string } | { kind: "empty-trash" };
+type ManageDialog = { kind: "rename-note" | "rename-folder" | "edit-tags"; id: string } | { kind: "delete-note" | "delete-folder"; id: string } | { kind: "empty-trash" };
+type ListedStudyItem = { note: Note; item: StudyItem; pageNumber: number | undefined };
 
 export function LibraryView() {
   const router = useRouter();
@@ -23,6 +24,13 @@ export function LibraryView() {
   const [viewMode, setViewMode] = useState<LibraryViewMode>("all");
   const [query, setQuery] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("recent");
+  const [bookmarkedOnly, setBookmarkedOnly] = useState(false);
+  const [activeStudyTag, setActiveStudyTag] = useState("");
+  const [reviewQueue, setReviewQueue] = useState<ListedStudyItem[]>([]);
+  const [reviewIndex, setReviewIndex] = useState(0);
+  const [reviewRevealed, setReviewRevealed] = useState(false);
+  const [reviewTotals, setReviewTotals] = useState({ again: 0, gotIt: 0 });
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [selectedNotes, setSelectedNotes] = useState<string[]>([]);
   const [manageDialog, setManageDialog] = useState<ManageDialog>();
   const [manageName, setManageName] = useState("");
@@ -48,6 +56,7 @@ export function LibraryView() {
   const restoreDialog = useRef<HTMLDialogElement>(null);
   const restoreInput = useRef<HTMLInputElement>(null);
   const manageDialogRef = useRef<HTMLDialogElement>(null);
+  const reviewDialogRef = useRef<HTMLDialogElement>(null);
   const isSubmitting = useRef(false);
 
   useEffect(() => {
@@ -62,15 +71,24 @@ export function LibraryView() {
   const folder = library?.folders.find((item) => item.id === folderId);
   const search = query.trim().toLocaleLowerCase();
   const filteredFolders = library?.folders.filter((item) => !search || item.name.toLocaleLowerCase().includes(search)) ?? [];
-  const notes = (library?.notes.filter((note) => folder ? note.folderId === folder.id : true) ?? [])
-    .filter((note) => !search || note.name.toLocaleLowerCase().includes(search))
+  const matchingNotes = (library?.notes ?? []).filter((note) => !search || [note.name, ...(note.tags ?? []), ...(note.studyItems ?? []).flatMap((item) => [item.prompt, item.answer])].some((text) => text.toLocaleLowerCase().includes(search)));
+  const notes = (matchingNotes.filter((note) => folder ? note.folderId === folder.id : true))
+    .filter((note) => !bookmarkedOnly || note.bookmarked)
     .sort(sortMode === "name" ? (a, b) => a.name.localeCompare(b.name) : (a, b) => b.updatedAt - a.updatedAt);
   const trashedNotes = (library?.trash ?? []).filter((entry) => !search || entry.note.name.toLocaleLowerCase().includes(search));
+  const allTags = [...new Set((library?.notes ?? []).flatMap((note) => note.tags ?? []))].sort((a, b) => a.localeCompare(b));
+  const visibleTags = allTags.filter((tag) => !search || tag.toLocaleLowerCase().includes(search));
+  const taggedNotes = (library?.notes ?? []).filter((note) => (note.tags?.length ?? 0) > 0 && (!activeStudyTag || note.tags?.includes(activeStudyTag)) &&
+    (!search || note.name.toLocaleLowerCase().includes(search) || note.tags?.some((tag) => tag.toLocaleLowerCase().includes(search))));
+  const studyItems: ListedStudyItem[] = (library?.notes ?? []).flatMap((note) => (note.studyItems ?? []).map((item) => ({
+    note, item, pageNumber: note.pages.findIndex((page) => page.id === item.pageId) + 1 || undefined,
+  }))).filter(({ note, item }) => !search || [note.name, ...(note.tags ?? []), item.prompt, item.answer].some((text) => text.toLocaleLowerCase().includes(search)));
 
   function openView(mode: LibraryViewMode) {
     setViewMode(mode);
     setFolderId(null);
     setSelectedNotes([]);
+    if (mode !== "tags") setActiveStudyTag("");
   }
 
   async function refreshLibrary() {
@@ -105,7 +123,14 @@ export function LibraryView() {
     setManageError("");
     if (item.kind === "rename-note") setManageName(library?.notes.find((note) => note.id === item.id)?.name ?? "");
     else if (item.kind === "rename-folder") setManageName(library?.folders.find((candidate) => candidate.id === item.id)?.name ?? "");
+    else if (item.kind === "edit-tags") setManageName(library?.notes.find((note) => note.id === item.id)?.tags?.join(", ") ?? "");
     setManageDialog(item);
+  }
+
+  function appendTagSuggestion(tag: string) {
+    const tags = manageName.split(",").map((value) => value.trim()).filter(Boolean);
+    if (!tags.includes(tag)) tags.push(tag);
+    setManageName(tags.join(", "));
   }
 
   useEffect(() => {
@@ -113,6 +138,41 @@ export function LibraryView() {
     manageDialogRef.current.showModal();
     manageDialogRef.current.querySelector<HTMLInputElement>("input[name=managed-name]")?.focus();
   }, [manageDialog]);
+
+  useEffect(() => {
+    if (reviewOpen && reviewDialogRef.current && !reviewDialogRef.current.open) reviewDialogRef.current.showModal();
+  }, [reviewOpen]);
+
+  function toggleBookmark(note: Note) {
+    const updated = { ...note, bookmarked: !note.bookmarked, updatedAt: Date.now() };
+    void saveNote(updated).then(() => setLibrary((current) => current && ({ ...current, notes: current.notes.map((item) => item.id === note.id ? updated : item) })), () => setActionError("Couldn’t save this bookmark. Check browser storage and try again."));
+  }
+
+  function startReview(items = studyItems) {
+    setReviewQueue(items);
+    setReviewIndex(0);
+    setReviewRevealed(false);
+    setReviewTotals({ again: 0, gotIt: 0 });
+    setReviewOpen(true);
+  }
+
+  async function markReviewed(result: "again" | "gotIt") {
+    const entry = reviewQueue[reviewIndex];
+    if (!entry) return;
+    const currentNote = library?.notes.find((note) => note.id === entry.note.id) ?? entry.note;
+    const currentItem = currentNote.studyItems?.find((item) => item.id === entry.item.id) ?? entry.item;
+    const item = { ...currentItem, againCount: (currentItem.againCount ?? 0) + (result === "again" ? 1 : 0), gotItCount: (currentItem.gotItCount ?? 0) + (result === "gotIt" ? 1 : 0), lastReviewedAt: Date.now() };
+    const updated = { ...currentNote, studyItems: (currentNote.studyItems ?? []).map((current) => current.id === item.id ? item : current) };
+    try {
+      await saveNote(updated);
+      setLibrary((current) => current && ({ ...current, notes: current.notes.map((note) => note.id === updated.id ? updated : note) }));
+      setReviewTotals((current) => ({ ...current, [result]: current[result] + 1 }));
+      setReviewIndex((current) => current + 1);
+      setReviewRevealed(false);
+    } catch {
+      setActionError("Couldn’t save this review. Check browser storage and try again.");
+    }
+  }
 
   async function submitManage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -130,6 +190,11 @@ export function LibraryView() {
         const name = manageName.trim();
         if (!item || !name) { setManageError("Enter a name."); return; }
         await saveFolder({ ...item, name });
+      } else if (manageDialog.kind === "edit-tags") {
+        const note = library.notes.find((item) => item.id === manageDialog.id);
+        if (!note) return;
+        const tags = [...new Set(manageName.split(",").map((tag) => tag.trim()).filter(Boolean))];
+        await saveNote({ ...note, tags, updatedAt: Date.now() });
       } else if (manageDialog.kind === "delete-note") await moveNoteToTrash(manageDialog.id);
       else if (manageDialog.kind === "delete-folder") {
         await deleteFolderAndUnfileNotes(manageDialog.id);
@@ -148,6 +213,19 @@ export function LibraryView() {
   async function restoreNote(id: string) {
     try { await restoreTrashedNote(id); await refreshLibrary(); setActionError(""); }
     catch { setActionError("Couldn’t restore this note. Check browser storage and try again."); }
+  }
+
+  async function removeStudyItem(noteId: string, itemId: string) {
+    const note = library?.notes.find((item) => item.id === noteId);
+    if (!note) return;
+    const updated = { ...note, studyItems: (note.studyItems ?? []).filter((item) => item.id !== itemId), updatedAt: Date.now() };
+    try {
+      await saveNote(updated);
+      setLibrary((current) => current && ({ ...current, notes: current.notes.map((item) => item.id === noteId ? updated : item) }));
+      setActionError("");
+    } catch {
+      setActionError("Couldn’t remove this study item. Check browser storage and try again.");
+    }
   }
 
   function showCreate(mode: CreateMode) {
@@ -255,6 +333,7 @@ export function LibraryView() {
     }
   }
 
+  const reviewItem = reviewQueue[reviewIndex];
   return (
     <div className="library-shell">
       <header className="site-header library-header">
@@ -327,6 +406,7 @@ export function LibraryView() {
                     <option value="recent">Recently updated</option><option value="name">Name A–Z</option>
                   </select>
                 </label>}
+                {viewMode === "all" && <label className="bookmark-filter"><input type="checkbox" checked={bookmarkedOnly} onChange={(event) => setBookmarkedOnly(event.currentTarget.checked)} /> Bookmarked</label>}
               </div>
               {viewMode === "all" && selectedNotes.length > 0 && <div className="bulk-note-actions" role="group" aria-label="Selected note actions">
                 <span>{selectedNotes.length} selected</span>
@@ -354,12 +434,14 @@ export function LibraryView() {
                   {notes.map((note) => <article className="note-card" key={note.id} draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", note.id); setDraggedNoteId(note.id); }} onDragEnd={() => setDraggedNoteId(undefined)}>
                     <label className="note-select"><input type="checkbox" checked={selectedNotes.includes(note.id)} aria-label={`Select ${note.name}`} onChange={(event) => { const checked = event.currentTarget.checked; setSelectedNotes((current) => checked ? [...current, note.id] : current.filter((id) => id !== note.id)); }} /></label>
                     <span className="note-drag-handle" aria-hidden="true"><GripVertical size={16} /></span>
+                    <button type="button" className={note.bookmarked ? "note-bookmark saved" : "note-bookmark"} aria-label={note.bookmarked ? `Remove bookmark from ${note.name}` : `Bookmark ${note.name}`} aria-pressed={!!note.bookmarked} title={note.bookmarked ? "Remove bookmark" : "Bookmark note"} onClick={() => toggleBookmark(note)}><Bookmark size={16} fill={note.bookmarked ? "currentColor" : "none"} /></button>
                     <Link className="note-card-link" href={`/notes/${note.id}`}>
                       <div className="note-cover"><div className={`paper-sample ${note.paper}`} style={paperStyle(note.paperSpacing)}><NotebookPen size={26} /></div></div>
-                      <div className="note-info"><strong>{note.name}</strong><span>{note.paper} · {note.pages.length} {note.pages.length === 1 ? "page" : "pages"}</span></div>
+                      <div className="note-info"><strong>{note.name}</strong><span>{note.paper} · {note.pages.length} {note.pages.length === 1 ? "page" : "pages"}</span>{note.tags?.length ? <span className="note-tag-list">{note.tags.map((tag) => <span className="note-tag" key={tag}>{tag}</span>)}</span> : null}</div>
                     </Link>
                     <div className="note-card-actions">
                       <button type="button" className="icon-button" aria-label={`Rename note ${note.name}`} title="Rename" onClick={() => openManage({ kind: "rename-note", id: note.id })}><Pencil size={15} /></button>
+                      <button type="button" className="icon-button" aria-label={`Edit study tags for ${note.name}`} title="Study tags" onClick={() => openManage({ kind: "edit-tags", id: note.id })}><Tag size={15} /></button>
                       <label className="note-move">Move <select aria-label={`Move ${note.name}`} value={note.folderId ?? "__unfiled"} onChange={(event) => void moveNotes([note.id], event.currentTarget.value === "__unfiled" ? null : event.currentTarget.value)}><option value="__unfiled">No folder</option>{library.folders.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
                       <button type="button" className="icon-button note-delete" aria-label={`Delete note ${note.name}`} title="Move to Trash" onClick={() => openManage({ kind: "delete-note", id: note.id })}><Trash2 size={15} /></button>
                     </div>
@@ -370,8 +452,20 @@ export function LibraryView() {
                   {!search && <button className="button button-primary" onClick={() => showCreate("note")}><Plus size={18} /> Create a note</button>}
                 </div>}
               </section>}
-              {viewMode === "tags" && <section className="library-section" aria-labelledby="tags-heading"><h2 id="tags-heading">Tags across your notes</h2><div className="empty-library"><span className="empty-icon"><Tag size={30} /></span><h3>Study tags are ready for your notes</h3><p>Add and filter note tags from this view. Tag editing arrives with study tools.</p></div></section>}
-              {viewMode === "study" && <section className="library-section" aria-labelledby="study-heading"><h2 id="study-heading">Study material</h2><div className="empty-library"><span className="empty-icon"><NotebookPen size={30} /></span><h3>Practice material will live here</h3><p>Flashcards and practice questions will be linked to their source pages.</p></div></section>}
+              {viewMode === "tags" && <section className="library-section" aria-labelledby="tags-heading"><h2 id="tags-heading">Tags across your notes</h2>
+                {visibleTags.length || taggedNotes.length ? <>
+                  {visibleTags.length > 0 && <div className="study-tag-filters">{visibleTags.map((tag) => <button type="button" key={tag} className={activeStudyTag === tag ? "study-tag-filter current" : "study-tag-filter"} aria-pressed={activeStudyTag === tag} onClick={() => setActiveStudyTag((current) => current === tag ? "" : tag)}>{tag}<span>{library.notes.filter((note) => note.tags?.includes(tag)).length}</span></button>)}</div>}
+                  {taggedNotes.length > 0 && <div className="note-grid study-tag-notes">{taggedNotes.map((note) => <Link className="study-source-card" key={note.id} href={`/notes/${note.id}`}><strong>{note.name}</strong><span>{note.tags?.map((tag) => `#${tag}`).join(" · ")}</span></Link>)}</div>}
+                </> : <div className="empty-library"><span className="empty-icon"><Tag size={30} /></span><h3>{search ? "No matching tags or notes" : "No study tags yet"}</h3><p>Add tags to notes with the tag button in All notes.</p></div>}
+              </section>}
+              {viewMode === "study" && <section className="library-section" aria-labelledby="study-heading"><div className="library-section-heading"><h2 id="study-heading">Study material</h2><button type="button" className="button button-primary" disabled={!studyItems.length} onClick={() => startReview()}><Sparkles size={16} /> Review material</button></div>
+                {studyItems.length ? <div className="study-material-list">{studyItems.map(({ note, item, pageNumber }) => <article className="study-material-card" key={item.id}>
+                  <div className="study-material-meta"><span>{item.type === "flashcard" ? "Flashcard" : "Practice question"}</span><span>{note.name}</span><span>{pageNumber ? `Page ${pageNumber}` : "Source page deleted"}</span></div>
+                  <p>{item.prompt}</p>{pageNumber ? <Link href={`/notes/${note.id}?page=${encodeURIComponent(item.pageId)}`}>Open source page</Link> : <Link href={`/notes/${note.id}`}>Open note</Link>}
+                  <div className="study-history">Again {item.againCount ?? 0} · Got it {item.gotItCount ?? 0}{item.lastReviewedAt ? ` · Reviewed ${new Date(item.lastReviewedAt).toLocaleDateString()}` : ""}</div>
+                  <button type="button" className="study-item-remove" aria-label={`Remove study item from ${note.name}`} onClick={() => void removeStudyItem(note.id, item.id)}>Remove item</button>
+                </article>)}</div> : <div className="empty-library"><span className="empty-icon"><NotebookPen size={30} /></span><h3>{search ? "No matching study material" : "No study material yet"}</h3><p>Open a note page and add a flashcard or practice question.</p></div>}
+              </section>}
               {viewMode === "trash" && <section className="library-section" aria-labelledby="trash-heading"><h2 id="trash-heading">Deleted notes</h2>{trashedNotes.length ? <div className="note-grid">{trashedNotes.map((entry) => <article className="trash-note-card" key={entry.id}><div><strong>{entry.note.name}</strong><span>Deleted {new Date(entry.deletedAt).toLocaleDateString()}</span></div><button type="button" className="button button-outline" onClick={() => void restoreNote(entry.id)}>Restore</button></article>)}</div> : <div className="empty-library"><span className="empty-icon"><Trash2 size={30} /></span><h3>Trash is empty</h3><p>Notes you delete will stay here until you empty Trash.</p></div>}</section>}
             </>
           )}
@@ -409,15 +503,29 @@ export function LibraryView() {
       </dialog>
       <dialog ref={manageDialogRef} className="create-dialog" aria-labelledby="manage-title" onClose={() => { if (!manageBusy) { setManageDialog(undefined); setManageError(""); } }} onCancel={(event) => { if (manageBusy) event.preventDefault(); }}>
         {manageDialog && <form onSubmit={(event) => void submitManage(event)}>
-          <div className="dialog-header"><h2 id="manage-title">{manageDialog.kind === "rename-note" ? "Rename note" : manageDialog.kind === "rename-folder" ? "Rename folder" : manageDialog.kind === "delete-note" ? "Move note to Trash?" : manageDialog.kind === "delete-folder" ? "Delete folder?" : "Empty Trash?"}</h2>
+          <div className="dialog-header"><h2 id="manage-title">{manageDialog.kind === "rename-note" ? "Rename note" : manageDialog.kind === "rename-folder" ? "Rename folder" : manageDialog.kind === "edit-tags" ? "Edit study tags" : manageDialog.kind === "delete-note" ? "Move note to Trash?" : manageDialog.kind === "delete-folder" ? "Delete folder?" : "Empty Trash?"}</h2>
             <button type="button" className="icon-button" aria-label="Close" disabled={manageBusy} onClick={() => manageDialogRef.current?.close()}><X size={21} /></button></div>
-          {(manageDialog.kind === "rename-note" || manageDialog.kind === "rename-folder") ? <label className="field">Name
-            <input name="managed-name" value={manageName} maxLength={80} required onChange={(event) => setManageName(event.currentTarget.value)} />
-          </label> : <p>{manageDialog.kind === "delete-note" ? "The note and its imported pages will remain in Trash until you empty it." : manageDialog.kind === "delete-folder" ? "Notes in this folder will be moved to All notes. The folder will be removed." : "This permanently removes all notes in Trash, including their imported pages. This cannot be undone."}</p>}
+          {(manageDialog.kind === "rename-note" || manageDialog.kind === "rename-folder" || manageDialog.kind === "edit-tags") ? <>
+            <label className="field">{manageDialog.kind === "edit-tags" ? "Tags, separated by commas" : "Name"}
+              <input name="managed-name" value={manageName} maxLength={manageDialog.kind === "edit-tags" ? 400 : 80} required={manageDialog.kind !== "edit-tags"} onChange={(event) => setManageName(event.currentTarget.value)} />
+            </label>
+            {manageDialog.kind === "edit-tags" && <div className="tag-suggestion-list"><span>Suggestions</span>{allTags.filter((tag) => !manageName.split(",").map((value) => value.trim()).includes(tag)).map((tag) => <button type="button" key={tag} onClick={() => appendTagSuggestion(tag)}>{tag}</button>)}</div>}
+          </> : <p>{manageDialog.kind === "delete-note" ? "The note and its imported pages will remain in Trash until you empty it." : manageDialog.kind === "delete-folder" ? "Notes in this folder will be moved to All notes. The folder will be removed." : "This permanently removes all notes in Trash, including their imported pages. This cannot be undone."}</p>}
           {manageError && <p className="error-text" role="alert">{manageError}</p>}
           <div className="dialog-actions"><button type="button" className="button button-outline" disabled={manageBusy} onClick={() => manageDialogRef.current?.close()}>Cancel</button>
-            <button className={manageDialog.kind === "delete-note" || manageDialog.kind === "delete-folder" || manageDialog.kind === "empty-trash" ? "button button-primary danger-button" : "button button-primary"} disabled={manageBusy}>{manageBusy ? "Saving…" : manageDialog.kind === "rename-note" || manageDialog.kind === "rename-folder" ? "Save" : manageDialog.kind === "delete-note" ? "Move to Trash" : manageDialog.kind === "delete-folder" ? "Delete folder" : "Empty Trash"}</button></div>
+            <button className={manageDialog.kind === "delete-note" || manageDialog.kind === "delete-folder" || manageDialog.kind === "empty-trash" ? "button button-primary danger-button" : "button button-primary"} disabled={manageBusy}>{manageBusy ? "Saving…" : manageDialog.kind === "rename-note" || manageDialog.kind === "rename-folder" || manageDialog.kind === "edit-tags" ? "Save" : manageDialog.kind === "delete-note" ? "Move to Trash" : manageDialog.kind === "delete-folder" ? "Delete folder" : "Empty Trash"}</button></div>
         </form>}
+      </dialog>
+      <dialog ref={reviewDialogRef} className="create-dialog review-dialog" aria-labelledby="review-title" onClose={() => setReviewOpen(false)}>
+        <div className="dialog-header"><div><h2 id="review-title">{reviewItem ? "Review material" : "Review complete"}</h2>{reviewItem && <p>{reviewIndex + 1} of {reviewQueue.length}</p>}</div>
+          <button type="button" className="icon-button" aria-label="Close review" onClick={() => reviewDialogRef.current?.close()}><X size={21} /></button></div>
+        {reviewItem ? <div className="review-card">
+          <div className="study-material-meta"><span>{reviewItem.item.type === "flashcard" ? "Flashcard" : "Practice question"}</span><span>{reviewItem.note.name}</span><span>{reviewItem.pageNumber ? `Page ${reviewItem.pageNumber}` : "Source page deleted"}</span></div>
+          <h3>{reviewItem.item.prompt}</h3>
+          {reviewRevealed ? <div className="review-answer" aria-live="polite"><span>{reviewItem.item.type === "flashcard" ? "Back" : "Answer"}</span><p>{reviewItem.item.answer}</p></div> : <button type="button" className="button button-outline" onClick={() => setReviewRevealed(true)}>Reveal answer</button>}
+          {reviewRevealed && <div className="review-rating"><button type="button" className="button button-outline" onClick={() => void markReviewed("again")}>Again</button><button type="button" className="button button-primary" onClick={() => void markReviewed("gotIt")}>Got it</button></div>}
+          {reviewItem.pageNumber ? <Link href={`/notes/${reviewItem.note.id}?page=${encodeURIComponent(reviewItem.item.pageId)}`}>Open source page</Link> : <Link href={`/notes/${reviewItem.note.id}`}>Open note</Link>}
+        </div> : <div className="review-complete" role="status"><p>Again: {reviewTotals.again} · Got it: {reviewTotals.gotIt}</p><button type="button" className="button button-primary" onClick={() => reviewDialogRef.current?.close()}>Done</button></div>}
       </dialog>
       <dialog ref={restoreDialog} className="create-dialog restore-dialog" aria-labelledby="restore-title" onClose={() => { if (!restoreBusy) { setRestorePreview(undefined); setRestoreChoices({}); setRestoreError(""); } }} onCancel={(event) => { if (restoreBusy) event.preventDefault(); }}>
         {restorePreview && <div>
