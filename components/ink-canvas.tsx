@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type TouchEvent as ReactTouchEvent } from "react";
-import { ClipboardPaste, Copy, RotateCw, Trash2 } from "lucide-react";
+import { ClipboardPaste, Copy, RotateCw, Sparkles, Trash2 } from "lucide-react";
 import type { EraserMode, Page, PaperType, Point, Stroke, TextBox } from "../lib/notebooks";
 import { caughtByLasso, caughtPolygonByLasso, drawStroke, eraseStrokePoints, hitsStroke, pageHeight, pageWidth } from "../lib/ink";
 import { boxCenter, hitsTextBox, selectionBounds, selectionTransform, textBoxCorners, transformBox, transformStroke, transformTextBox, type Bounds, type PageItems, type SelectionTransform } from "../lib/selection";
@@ -50,7 +50,7 @@ function commitInkGesture(current: Gesture | null, pageId: string, onEdit: EditP
   }
 }
 
-export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, clipboard, toolShortcuts, onCopy, onEdit, onZoomChange }: {
+export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, clipboard, toolShortcuts, onCopy, onEdit, onZoomChange, onAskAI }: {
   page: Page;
   pageNumber: number;
   paper: PaperType;
@@ -62,6 +62,7 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
   onCopy: (items: PageItems) => void;
   onEdit: EditPage;
   onZoomChange: (zoom: number) => void;
+  onAskAI: (items: PageItems, trigger: HTMLButtonElement) => void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
@@ -408,6 +409,10 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
       {selected.size > 0 && <button type="button" className="editor-tool" aria-label="Copy selection" title="Copy selection" onClick={copySelection}><Copy size={18} /></button>}
       {clipboard && <button type="button" className="editor-tool" aria-label="Paste selection" title="Paste selection" onClick={pasteSelection}><ClipboardPaste size={18} /></button>}
       {selected.size > 0 && <button type="button" className="editor-tool" aria-label="Delete selected objects" title="Delete selected objects" onClick={deleteSelection}><Trash2 size={18} /></button>}
+      {selected.size > 0 && <button type="button" className="page-action lasso-ask-ai" aria-controls="ai-panel"
+        onClick={(event) => { if (!gesture.current) onAskAI(selection, event.currentTarget); }}>
+        <Sparkles size={16} aria-hidden="true" /> Ask AI
+      </button>}
     </div>}
     <div ref={scroll} className="paper-scroll" onTouchStart={beginTouchZoom} onTouchMove={updateTouchZoom} onTouchEnd={endTouchZoom} onTouchCancel={endTouchZoom}>
       <div className="paper-zoom" style={{ "--zoom": zoom } as CSSProperties}>

@@ -72,6 +72,17 @@ A tool that lets users drag the page around without drawing a stroke.
 A selection made by drawing a freeform boundary; any overlapping strokes or text boxes can be moved or deleted.
 _Avoid_: Scissor selection
 
+## AI tutor
+
+**Tutor conversation**:
+A sequence of questions and replies for one open note during an editor session.
+
+**Note context**:
+The open note's numbered pages and the page the user is currently viewing, available to the tutor for a question.
+
+**Selection attachment**:
+A snapshot of the strokes and text boxes selected with **Ask AI**, linked to its source page.
+
 ## Data safety
 
 **Backup archive**:
