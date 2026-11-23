@@ -18,6 +18,7 @@ export type TextBox = {
 export type Page = { id: string; strokes: Stroke[]; textBoxes: TextBox[]; background?: Blob };
 export type Note = {
   id: string;
+  restoredFromId?: string;
   name: string;
   folderId: string | null;
   paper: PaperType;

@@ -125,6 +125,20 @@ p { line-height: 1.65; }
 .library-title h1 { font: 400 clamp(2.55rem, 5vw, 4rem)/1.05 var(--serif); letter-spacing: -.06em; overflow-wrap: anywhere; }
 .library-title p { color: var(--muted); margin-top: 6px; }
 .library-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.backup-input { display: none; }
+.library-backup-error { max-width: 680px; margin: -20px 0 24px; }
+.restore-dialog { width: min(calc(100% - 26px), 620px); overflow-y: auto; }
+.restore-dialog .dialog-header p { margin-top: 4px; color: var(--muted); font-size: .9rem; }
+.restore-summary { display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 9px; background: #edf3ea; color: var(--green); font-size: .9rem; font-weight: 650; }
+.restore-conflicts { display: grid; gap: 12px; max-height: 35dvh; overflow-y: auto; margin: 17px 0; padding: 12px; border: 1px solid var(--line); border-radius: 9px; }
+.restore-conflicts legend { padding-inline: 5px; font-size: .86rem; font-weight: 700; }
+.restore-conflict { min-width: 0; display: grid; gap: 8px; padding: 0 0 12px; border: 0; border-bottom: 1px solid var(--line); }
+.restore-conflict:last-child { padding-bottom: 0; border-bottom: 0; }
+.restore-conflict legend { max-width: 100%; padding: 0; overflow-wrap: anywhere; font-weight: 700; }
+.restore-choice-list { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.restore-choice-list label, .restore-settings { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: .85rem; }
+.restore-choice-list input, .restore-settings input { accent-color: var(--green); }
+.restore-settings { margin-top: 15px; }
 .library-section + .library-section { margin-top: 32px; }
 .library-section h2 { font-size: 1.02rem; margin-bottom: 13px; }
 .folder-grid, .note-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 176px), 1fr)); gap: 12px; }
