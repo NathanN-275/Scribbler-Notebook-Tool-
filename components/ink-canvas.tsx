@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type TouchEvent as ReactTouchEvent } from "react";
 import { ClipboardPaste, Copy, RotateCw, Trash2 } from "lucide-react";
 import type { EraserMode, Page, PaperType, Point, Stroke, TextBox } from "../lib/notebooks";
 import { caughtByLasso, caughtPolygonByLasso, drawStroke, eraseStrokePoints, hitsStroke, pageHeight, pageWidth } from "../lib/ink";
@@ -25,6 +25,7 @@ type Gesture = { pointerId: number; last: Point } & (
   | TransformGesture
   | { type: "pan"; start: Point; scrollLeft: number; scrollTop: number }
 );
+type TouchZoomGesture = { distance: number; zoom: number; contentX: number; contentY: number };
 
 const textPlaceholder = "type something...";
 const pasteOffset = 24;
@@ -49,7 +50,7 @@ function commitInkGesture(current: Gesture | null, pageId: string, onEdit: EditP
   }
 }
 
-export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, clipboard, onCopy, onEdit }: {
+export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, clipboard, toolShortcuts, onCopy, onEdit, onZoomChange }: {
   page: Page;
   pageNumber: number;
   paper: PaperType;
@@ -57,12 +58,15 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
   tool: DrawingTool;
   zoom: number;
   clipboard?: PageItems;
+  toolShortcuts: Record<"pen" | "pencil" | "eraser" | "text" | "pan" | "lasso", string>;
   onCopy: (items: PageItems) => void;
   onEdit: EditPage;
+  onZoomChange: (zoom: number) => void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const gesture = useRef<Gesture | null>(null);
+  const touchZoomGesture = useRef<TouchZoomGesture | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [preview, setPreview] = useState<SelectionTransform>();
   const [focusedBoxId, setFocusedBoxId] = useState<string>();
@@ -207,6 +211,41 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
     const x = (event.clientX - rect.left) * pageWidth / rect.width;
     const y = (event.clientY - rect.top) * pageHeight / rect.height;
     return clamp ? { x: Math.max(0, Math.min(pageWidth, x)), y: Math.max(0, Math.min(pageHeight, y)) } : { x, y };
+  }
+
+  function beginTouchZoom(event: ReactTouchEvent<HTMLDivElement>) {
+    if (event.touches.length !== 2) return;
+    const [first, second] = [event.touches[0], event.touches[1]];
+    const centerX = (first.clientX + second.clientX) / 2;
+    const centerY = (first.clientY + second.clientY) / 2;
+    const rect = event.currentTarget.getBoundingClientRect();
+    gesture.current = null;
+    setPreview(undefined);
+    paint();
+    const distance = Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY);
+    touchZoomGesture.current = {
+      distance: Math.max(1, distance), zoom,
+      contentX: (centerX - rect.left + event.currentTarget.scrollLeft) / zoom,
+      contentY: (centerY - rect.top + event.currentTarget.scrollTop) / zoom,
+    };
+  }
+
+  function updateTouchZoom(event: ReactTouchEvent<HTMLDivElement>) {
+    const initial = touchZoomGesture.current;
+    if (!initial || event.touches.length !== 2) return;
+    const [first, second] = [event.touches[0], event.touches[1]];
+    const centerX = (first.clientX + second.clientX) / 2;
+    const centerY = (first.clientY + second.clientY) / 2;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const distance = Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY);
+    const nextZoom = Math.max(.5, Math.min(2, Math.round(initial.zoom * distance / initial.distance * 10) / 10));
+    onZoomChange(nextZoom);
+    event.currentTarget.scrollLeft = initial.contentX * nextZoom - (centerX - rect.left);
+    event.currentTarget.scrollTop = initial.contentY * nextZoom - (centerY - rect.top);
+  }
+
+  function endTouchZoom(event: ReactTouchEvent<HTMLDivElement>) {
+    if (event.touches.length < 2) touchZoomGesture.current = null;
   }
 
   function startTransform(event: PointerEvent<HTMLElement>, action: TransformAction, ids: Set<string>, origin: Point) {
@@ -370,11 +409,11 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
       {clipboard && <button type="button" className="editor-tool" aria-label="Paste selection" title="Paste selection" onClick={pasteSelection}><ClipboardPaste size={18} /></button>}
       {selected.size > 0 && <button type="button" className="editor-tool" aria-label="Delete selected objects" title="Delete selected objects" onClick={deleteSelection}><Trash2 size={18} /></button>}
     </div>}
-    <div ref={scroll} className="paper-scroll">
+    <div ref={scroll} className="paper-scroll" onTouchStart={beginTouchZoom} onTouchMove={updateTouchZoom} onTouchEnd={endTouchZoom} onTouchCancel={endTouchZoom}>
       <div className="paper-zoom" style={{ "--zoom": zoom } as CSSProperties}>
         <div className={`editor-paper ${paper}`} style={paperStyle(paperSpacing)}>
           {backgroundUrl && <img className="page-background" src={backgroundUrl} alt="Imported page background" />}
-          <canvas ref={canvas} className={`ink-canvas tool-${tool.type}`} aria-label={`Drawing surface, page ${pageNumber}`}
+          <canvas ref={canvas} className={`ink-canvas tool-${tool.type}`} role="application" tabIndex={0} aria-label={`Drawing surface, page ${pageNumber}. Press ${toolShortcuts.pen.toUpperCase()} for pen, ${toolShortcuts.pencil.toUpperCase()} for pencil, ${toolShortcuts.eraser.toUpperCase()} for eraser, ${toolShortcuts.text.toUpperCase()} for text, ${toolShortcuts.pan.toUpperCase()} for pan, or ${toolShortcuts.lasso.toUpperCase()} for lasso.`}
             onPointerDown={startGesture} onPointerMove={updateGesture} onPointerUp={(event) => finishGesture(event)}
             onPointerCancel={(event) => finishGesture(event, true)} onLostPointerCapture={(event) => finishGesture(event, true)} />
           <div className={`text-layer ${tool.type === "text" ? "text-editing" : ""}`}>
@@ -385,7 +424,7 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
               return <div key={box.id} data-box-id={box.id}
                 className={`text-box${isSelected ? " text-selected" : ""}${empty ? " text-empty" : ""}`}
                 style={{ ...boxStyle(displayed, displayed.rotation), "--text-scale": displayed.textScale ?? 1 } as CSSProperties}>
-                {tool.type === "text" ? <textarea data-text-box={box.id} aria-label="Note text box" placeholder={textPlaceholder} value={box.text}
+                {tool.type === "text" ? <textarea data-text-box={box.id} aria-label={`Text box on page ${pageNumber}`} placeholder={textPlaceholder} value={box.text}
                   onChange={(event) => updateTextBox(box.id, { text: event.currentTarget.value })}
                   onBlur={(event) => {
                     const input = event.currentTarget;

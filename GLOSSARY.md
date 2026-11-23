@@ -43,6 +43,9 @@ A manually authored flashcard or short-answer practice question linked to one pa
 **Review history**:
 Per-item counts for “Again” and “Got it”, plus the last review time. The first version does not schedule spaced repetition.
 
+**Editor shortcut guide**:
+An accessible in-editor reference for keyboard actions, including editable browser-local tool keys. Defaults are Q for pen, W for pencil, E for eraser, R for text, T for pan, and Y for lasso. Shortcuts are paused while the user types or a dialog is open.
+
 **Paper type**:
 The visual guide shown behind the ink on a note's pages: plain, lined, graph, or dotted.
 _Avoid_: Template
