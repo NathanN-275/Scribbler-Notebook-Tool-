@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { BookOpen, Check, ChevronLeft, ChevronRight, Download, Eraser, FileText, Hand, Lasso, Pencil, PenTool, Plus, Redo2, Settings, Sparkles, Type, Undo2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
+import { BookOpen, Check, ChevronLeft, ChevronRight, Copy, Download, Eraser, FileText, Hand, Lasso, Pencil, PenTool, Plus, Redo2, Settings, Sparkles, Trash2, Type, Undo2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
 import { defaultEditorSettings, newPage, nextUntitledNoteName, readEditorSettings, readLibrary, readNote, saveEditorSettings, saveNote, type EditorSettings, type Note, type Page } from "../lib/notebooks";
 import { downloadBlob, makePdf, prepareFilePages, renderPageBlob } from "../lib/files";
 import { InkCanvas, type DrawingTool } from "./ink-canvas";
@@ -61,13 +61,13 @@ function BlobPreview({ blob, label }: { blob: Blob; label: string }) {
   return url ? <img src={url} alt={label} /> : <span className="page-thumbnail-loading" />;
 }
 
-function NotePagePreview({ note, page, label }: { note: Note; page: Page; label: string }) {
+function NotePagePreview({ note, page, label, resolution = 2 }: { note: Note; page: Page; label: string; resolution?: number }) {
   const [blob, setBlob] = useState<Blob>();
   useEffect(() => {
     let active = true;
-    renderPageBlob(note, page).then((rendered) => { if (active) setBlob(rendered); }).catch(() => undefined);
+    renderPageBlob(note, page, resolution).then((rendered) => { if (active) setBlob(rendered); }).catch(() => undefined);
     return () => { active = false; };
-  }, [note, page]);
+  }, [note, page, resolution]);
   return blob ? <BlobPreview blob={blob} label={label} /> : <span className="page-thumbnail-loading" />;
 }
 
@@ -101,6 +101,9 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   const [exportSelection, setExportSelection] = useState<string[]>([]);
   const [exportBusy, setExportBusy] = useState(false);
   const [fileActionError, setFileActionError] = useState("");
+  const [pageToDelete, setPageToDelete] = useState<string>();
+  const [deletedPage, setDeletedPage] = useState<{ page: Page; index: number }>();
+  const [draggedPageId, setDraggedPageId] = useState<string>();
   const histories = useRef(new Map<string, History>());
   const latestSave = useRef(0);
   const noteRef = useRef<Note | null | undefined>(undefined);
@@ -110,6 +113,8 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   const renameDialog = useRef<HTMLDialogElement>(null);
   const uploadDialog = useRef<HTMLDialogElement>(null);
   const exportDialog = useRef<HTMLDialogElement>(null);
+  const deletePageDialog = useRef<HTMLDialogElement>(null);
+  const undoPageTimer = useRef<number | undefined>(undefined);
   const page: Page | undefined = note?.pages[pageIndex];
   noteRef.current = note;
   const history = page && histories.current.get(page.id);
@@ -152,6 +157,13 @@ export function NoteEditor({ noteId }: { noteId: string }) {
     if (!exportSelection.length || !exportDialog.current || exportDialog.current.open) return;
     exportDialog.current.showModal();
   }, [exportSelection]);
+
+  useEffect(() => {
+    if (!pageToDelete || !deletePageDialog.current || deletePageDialog.current.open) return;
+    deletePageDialog.current.showModal();
+  }, [pageToDelete]);
+
+  useEffect(() => () => window.clearTimeout(undoPageTimer.current), []);
 
   useEffect(() => {
     if (saveStatus === "saved") return;
@@ -215,6 +227,62 @@ export function NoteEditor({ noteId }: { noteId: string }) {
     if (!note) return;
     const pageItem = newPage();
     void persist({ ...note, pages: [...note.pages, pageItem] }).then(() => setPageIndex(note.pages.length)).catch(() => undefined);
+  }
+
+  function reorderPages(sourceId: string, targetId: string) {
+    const current = noteRef.current;
+    if (!current || sourceId === targetId) return;
+    const from = current.pages.findIndex((item) => item.id === sourceId);
+    const to = current.pages.findIndex((item) => item.id === targetId);
+    if (from < 0 || to < 0) return;
+    const pages = [...current.pages];
+    const [moved] = pages.splice(from, 1);
+    pages.splice(to, 0, moved);
+    const selectedId = page?.id;
+    void persist({ ...current, pages }).then(() => {
+      if (selectedId) setPageIndex(pages.findIndex((item) => item.id === selectedId));
+    }).catch(() => undefined);
+  }
+
+  function duplicatePage() {
+    const current = noteRef.current;
+    const source = current?.pages.find((item) => item.id === page?.id);
+    if (!current || !source) return;
+    const duplicate: Page = {
+      ...source,
+      id: crypto.randomUUID(),
+      strokes: source.strokes.map((stroke) => ({ ...stroke, id: crypto.randomUUID(), points: stroke.points.map((point) => ({ ...point })) })),
+      textBoxes: source.textBoxes.map((box) => ({ ...box, id: crypto.randomUUID() })),
+    };
+    const pages = [...current.pages];
+    const index = pages.findIndex((item) => item.id === source.id) + 1;
+    pages.splice(index, 0, duplicate);
+    void persist({ ...current, pages }).then(() => setPageIndex(index)).catch(() => undefined);
+  }
+
+  function confirmPageDelete() {
+    const current = noteRef.current;
+    if (!current || current.pages.length <= 1 || !pageToDelete) return;
+    const index = current.pages.findIndex((item) => item.id === pageToDelete);
+    if (index < 0) return;
+    const [removed] = current.pages.slice(index, index + 1);
+    const pages = current.pages.filter((item) => item.id !== pageToDelete);
+    window.clearTimeout(undoPageTimer.current);
+    setDeletedPage({ page: removed, index });
+    undoPageTimer.current = window.setTimeout(() => setDeletedPage(undefined), 8000);
+    void persist({ ...current, pages }).then(() => setPageIndex(Math.min(index, pages.length - 1))).catch(() => undefined);
+    deletePageDialog.current?.close();
+  }
+
+  function undoPageDelete() {
+    const current = noteRef.current;
+    if (!current || !deletedPage) return;
+    const pages = [...current.pages];
+    const index = Math.min(deletedPage.index, pages.length);
+    pages.splice(index, 0, deletedPage.page);
+    window.clearTimeout(undoPageTimer.current);
+    setDeletedPage(undefined);
+    void persist({ ...current, pages }).then(() => setPageIndex(index)).catch(() => undefined);
   }
 
   async function saveSettings(updated: EditorSettings) {
@@ -417,10 +485,36 @@ export function NoteEditor({ noteId }: { noteId: string }) {
       <main className="editor-workspace">
         <InkCanvas key={page.id} page={page} pageNumber={pageIndex + 1} paper={note.paper} paperSpacing={note.paperSpacing}
           tool={drawingTool} zoom={zoom} clipboard={clipboard} onCopy={setClipboard} onEdit={editPage} />
+        <nav className="page-thumbnails" aria-label="Page thumbnails">
+          <div className="page-thumbnail-strip">
+            {note.pages.map((item, index) => <div className="page-thumbnail-card" key={item.id}
+              draggable
+              onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", item.id); setDraggedPageId(item.id); }}
+              onDragEnd={() => setDraggedPageId(undefined)}
+              onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; }}
+              onDrop={(event) => { event.preventDefault(); reorderPages(event.dataTransfer.getData("text/plain") || draggedPageId || "", item.id); setDraggedPageId(undefined); }}>
+              <button type="button" className={page.id === item.id ? "page-thumbnail current" : "page-thumbnail"}
+                aria-label={`Go to page ${index + 1}`} aria-current={page.id === item.id ? "page" : undefined}
+                onClick={() => setPageIndex(index)}>
+                <NotePagePreview note={note} page={item} label="" resolution={0.35} />
+                <span>Page {index + 1}</span>
+              </button>
+              <div className="page-thumbnail-actions" aria-label={`Reorder page ${index + 1}`}>
+                <button type="button" aria-label={`Move page ${index + 1} earlier`} title="Move earlier" disabled={index === 0} onClick={() => reorderPages(item.id, note.pages[index - 1].id)}><ChevronLeft size={14} /></button>
+                <button type="button" aria-label={`Move page ${index + 1} later`} title="Move later" disabled={index === note.pages.length - 1} onClick={() => reorderPages(item.id, note.pages[index + 1].id)}><ChevronRight size={14} /></button>
+              </div>
+            </div>)}
+          </div>
+        </nav>
+        {deletedPage && <div className="page-undo" role="status" aria-live="polite">
+          <span>Page {deletedPage.index + 1} deleted.</span><button type="button" onClick={undoPageDelete}>Undo</button>
+        </div>}
         <nav className="editor-pagination" aria-label="Note pages">
           <ToolButton label="Previous page" disabled={pageIndex === 0} onClick={() => setPageIndex(pageIndex - 1)}><ChevronLeft size={20} /></ToolButton>
           <span aria-live="polite">Page {pageIndex + 1} of {note.pages.length}</span>
           <ToolButton label="Next page" disabled={pageIndex + 1 === note.pages.length} onClick={() => setPageIndex(pageIndex + 1)}><ChevronRight size={20} /></ToolButton>
+          <button type="button" className="page-action" onClick={duplicatePage}><Copy size={16} /> Duplicate</button>
+          <button type="button" className="page-action page-delete-action" disabled={note.pages.length <= 1} onClick={() => setPageToDelete(page.id)}><Trash2 size={16} /> Delete</button>
           <button type="button" className="add-page" onClick={addPage}><Plus size={18} /> Add page</button>
         </nav>
       </main>
@@ -449,6 +543,13 @@ export function NoteEditor({ noteId }: { noteId: string }) {
           <button className="button button-primary">Save paper settings</button>
         </div>
       </form>
+    </dialog>
+    <dialog ref={deletePageDialog} className="create-dialog" aria-labelledby="delete-page-title" onClose={() => setPageToDelete(undefined)}>
+      <div className="dialog-header"><h2 id="delete-page-title">Delete page?</h2>
+        <button type="button" className="icon-button" aria-label="Close" onClick={() => deletePageDialog.current?.close()}><X size={21} /></button></div>
+      <p>This removes page {note.pages.findIndex((item) => item.id === pageToDelete) + 1} from “{note.name}”. You can undo for a few seconds after deleting it.</p>
+      <div className="dialog-actions"><button type="button" className="button button-outline" onClick={() => deletePageDialog.current?.close()}>Cancel</button>
+        <button type="button" className="button button-primary page-delete-confirm" onClick={confirmPageDelete}>Delete page</button></div>
     </dialog>
     <dialog ref={eraserDialog} className="create-dialog" aria-labelledby="eraser-title">
       <div className="dialog-header"><h2 id="eraser-title">Eraser mode</h2>

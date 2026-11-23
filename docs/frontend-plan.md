@@ -8,14 +8,14 @@ Build a browser-based note-taking frontend for the cloud computing class project
 
 - Landing page explains the note-taking product and its planned AI tutor, with a **Try the tool** button leading to the library.
 - The library shows a grid of flat folders and notes. Users can create folders and create notes with a name and paper type.
-- A note contains multiple pages. Users can add pages and move between them. Reordering and deleting pages are deferred.
+- A note contains one or more pages. Users can add, navigate, reorder, duplicate, and delete pages from a thumbnail strip; each note always keeps at least one page.
 - Each note starts with lined, graph, or dotted paper. Users can change paper from inside the editor; the selected paper applies to all pages in that note.
 - The editor follows the reference screenshot's broad layout: top navigation and tool controls, a large paper canvas, compact page navigation, and Scribbler styling.
 - The editor has pen, pencil, eraser, lasso, undo, and redo. Pen and pencil have independent size presets and color swatches. Lasso selection supports moving and deleting ink strokes.
 - A toggleable AI panel appears as a nonfunctional placeholder. Live AI, handwriting recognition, and AWS integration are deferred.
 - Support mouse/trackpad and touch input.
 - Save changes automatically in the current browser using IndexedDB. No sign-in or cross-device sync.
-- Sharing, export, and nested folders are deferred.
+- Sharing and nested folders are deferred. PDF export and full-library backup/restore are available locally.
 
 ## Recommended implementation
 
@@ -74,7 +74,7 @@ Build a browser-based note-taking frontend for the cloud computing class project
 
 - Live AI chat, AWS model hosting/inference, handwriting recognition, or AI feedback on selected notes.
 - User accounts, server-side note storage, or sync across browsers/devices.
-- Export, sharing, nested folders, page reorder/delete, text recognition, or additional drawing tools.
+- Sharing, nested folders, text recognition, or additional drawing tools.
 
 ## Decisions to settle during implementation
 

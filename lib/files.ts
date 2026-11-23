@@ -79,12 +79,12 @@ function drawPaper(ctx: CanvasRenderingContext2D, paper: PaperType, spacing: num
   }
 }
 
-export async function renderPageBlob(note: Note, page: Page) {
+export async function renderPageBlob(note: Note, page: Page, resolution = 2) {
   const canvas = document.createElement("canvas");
-  canvas.width = pageWidth * 2;
-  canvas.height = pageHeight * 2;
+  canvas.width = Math.ceil(pageWidth * resolution);
+  canvas.height = Math.ceil(pageHeight * resolution);
   const ctx = canvas.getContext("2d")!;
-  ctx.scale(2, 2);
+  ctx.scale(resolution, resolution);
   drawPaper(ctx, note.paper, note.paperSpacing);
   if (page.background) {
     const image = new Image();

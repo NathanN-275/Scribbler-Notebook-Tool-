@@ -4,7 +4,7 @@
 
 ![Scribbler homepage with a preview of handwritten calculus notes on graph paper](docs/images/scribbler-home.png)
 
-Scribbler is a browser notebook for handwritten notes and study. Create a folder or note from the library, choose a paper type and spacing, and open the editor. Notes save automatically in the current browser. The editor supports ink, text boxes, local page imports, and PDF export. The AI tutor panel previews a future AWS integration.
+Scribbler is a browser notebook for handwritten notes and study. Create a folder or note from the library, choose a paper type and spacing, and open the editor. Notes save automatically in the current browser. The editor supports ink, text boxes, page thumbnails, page reordering, duplication and deletion with undo, local page imports, and PDF export. The library can also export and restore a full Scribbler backup. The AI tutor panel previews a future AWS integration.
 
 ## Run locally
 
@@ -23,7 +23,7 @@ Open [localhost:3000](http://localhost:3000). Use `npm run build` to create a pr
 - `components/editor.tsx` coordinates pages, tool settings, import/export, and save feedback. `components/ink-canvas.tsx` handles drawing, text boxes, selection, and page panning.
 - `lib/ink.ts` holds drawing and hit detection. `lib/files.ts` renders local imports and PDFs. `lib/notebooks.ts` owns the notebook model and IndexedDB transactions.
 
-Select the active Eraser again to choose between removing a whole stroke and erasing only the part you touch. Undo and redo apply to page edits on the current page and reset when the editor closes. Imported page images and tool settings are local to this browser profile and site address; they do not sync to other devices.
+Select the active Eraser again to choose between removing a whole stroke and erasing only the part you touch. Undo and redo apply to page edits on the current page and reset when the editor closes. Imported page images and tool settings are local to this browser profile and site address; they do not sync to other devices. Use **Back up** in the library to save a portable `.scribbler` archive, and **Restore** to merge one into the current library.
 
 ## Vercel
 

@@ -16,6 +16,12 @@ _Avoid_: Document, notebook (when referring to a page)
 A single sheet inside a note. All pages in a note share its paper type and spacing; a page can contain strokes, text boxes, and an imported page background.
 _Avoid_: Sheet (as a product term)
 
+**Page thumbnail**:
+A small preview of a page used to select and navigate between pages in a note.
+
+**Duplicated page**:
+A new page that starts with the selected page's writing, text boxes, and imported background, while keeping its own page identity.
+
 **Paper type**:
 The visual guide shown behind the ink on a note's pages: plain, lined, graph, or dotted.
 _Avoid_: Template
