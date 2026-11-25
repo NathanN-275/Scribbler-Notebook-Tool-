@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { BookOpen, Bookmark, BookMarked, Check, ChevronLeft, ChevronRight, Copy, Download, Eraser, FileText, Hand, Keyboard, Lasso, Pencil, PenTool, Plus, Redo2, Settings, Sparkles, Trash2, Type, Undo2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
+import { BookOpen, Bookmark, BookMarked, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Copy, Download, Eraser, FileText, Hand, Keyboard, Lasso, Pencil, PenTool, Plus, Redo2, Settings, Sparkles, Trash2, Type, Undo2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
 import { defaultEditorSettings, newPage, nextUntitledNoteName, readEditorSettings, readLibrary, readNote, saveEditorSettings, saveNote, storageFailureMessage, type EditorSettings, type Note, type Page, type StudyItem } from "../lib/notebooks";
 import { downloadBlob, makePdf, prepareFilePages, renderPageBlob } from "../lib/files";
 import { bedrockAIProvider, mockAIProvider, type AIAttachment } from "../lib/ai-tutor";
@@ -88,6 +88,7 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "error">("saved");
   const [saveErrorMessage, setSaveErrorMessage] = useState("");
   const [pageIndex, setPageIndex] = useState(0);
+  const [thumbnailStripOpen, setThumbnailStripOpen] = useState<boolean>();
   const [clipboard, setClipboard] = useState<PageItems>();
   const [tool, setTool] = useState<Tool>("pen");
   const [inkColors, setInkColors] = useState({ pen: colors[0].value, pencil: colors[0].value });
@@ -561,6 +562,7 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   }
 
   const selectedForExport = note.pages.filter((item) => exportSelection.includes(item.id));
+  const showPageThumbnails = thumbnailStripOpen ?? (note.pages.length > 1);
   return <div className="editor">
     <header className="editor-topbar">
       <Link href="/library" className="editor-back" aria-label="Library"><BookOpen size={18} /><span>Library</span></Link>
@@ -633,8 +635,8 @@ export function NoteEditor({ noteId }: { noteId: string }) {
         <InkCanvas key={page.id} page={page} pageNumber={pageIndex + 1} paper={note.paper} paperSpacing={note.paperSpacing}
           tool={drawingTool} zoom={zoom} clipboard={clipboard} toolShortcuts={toolShortcuts} onCopy={setClipboard} onEdit={editPage} onZoomChange={setZoom}
           onAskAI={(items, trigger) => openTutor(trigger, { pageId: page.id, items })} />
-        <nav className="page-thumbnails" aria-label="Page thumbnails">
-          <div className="page-thumbnail-strip">
+        <nav id="page-thumbnails" className="page-thumbnails" aria-label="Page thumbnails" hidden={!showPageThumbnails}>
+          {showPageThumbnails && <div className="page-thumbnail-strip">
             {note.pages.map((item, index) => <div className="page-thumbnail-card" key={item.id}
               draggable
               onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", item.id); setDraggedPageId(item.id); }}
@@ -652,12 +654,17 @@ export function NoteEditor({ noteId }: { noteId: string }) {
                 <button type="button" aria-label={`Move page ${index + 1} later`} title="Move later" disabled={index === note.pages.length - 1} onClick={() => reorderPages(item.id, note.pages[index + 1].id)}><ChevronRight size={14} /></button>
               </div>
             </div>)}
-          </div>
+          </div>}
         </nav>
         {deletedPage && <div className="page-undo" role="status" aria-live="polite">
           <span>Page {deletedPage.index + 1} deleted.</span><button type="button" onClick={undoPageDelete}>Undo</button>
         </div>}
         <nav className="editor-pagination" aria-label="Note pages">
+          <button type="button" className="page-action" aria-expanded={showPageThumbnails} aria-controls="page-thumbnails"
+            onClick={() => setThumbnailStripOpen(!showPageThumbnails)}>
+            {showPageThumbnails ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronUp size={16} aria-hidden="true" />}
+            {showPageThumbnails ? "Hide thumbnails" : "Show thumbnails"}
+          </button>
           <ToolButton label="Previous page" disabled={pageIndex === 0} onClick={() => setPageIndex(pageIndex - 1)}><ChevronLeft size={20} /></ToolButton>
           <span aria-live="polite">Page {pageIndex + 1} of {note.pages.length}</span>
           <ToolButton label="Next page" disabled={pageIndex + 1 === note.pages.length} onClick={() => setPageIndex(pageIndex + 1)}><ChevronRight size={20} /></ToolButton>
