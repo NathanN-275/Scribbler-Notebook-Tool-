@@ -11,6 +11,7 @@ export type AIContext = {
 };
 
 export const maxTutorMessageLength = 3000;
+export const maxTutorReplyHistoryLength = 8000;
 
 export type AIMessage = { role: "user" | "assistant"; content: string };
 export type AIRequest = { context: AIContext; messages: readonly AIMessage[] };
@@ -66,7 +67,7 @@ export const bedrockAIProvider: AIProvider = {
     const { renderPageBlob } = await import("./files");
     const recentMessages = messages.slice(-19).map(({ role, content }) => ({
       role,
-      content: content.slice(0, maxTutorMessageLength),
+      content: content.slice(0, role === "assistant" ? maxTutorReplyHistoryLength : maxTutorMessageLength),
     }));
     const numberedPages = context.pages;
     const currentPage = numberedPages.find(({ page }) => page.id === context.currentPageId);

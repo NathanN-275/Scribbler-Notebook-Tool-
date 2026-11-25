@@ -1,7 +1,7 @@
 import { useAuth, UserButton } from "@clerk/nextjs";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Sparkles, X } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { GripVertical, Sparkles, X } from "lucide-react";
 import { createAIContext, maxTutorMessageLength, type AIAttachment, type AIMessage, type AIProvider, type TutorUsage } from "../lib/ai-tutor";
 import type { Note } from "../lib/notebooks";
 import { AccountControls } from "./account-controls";
@@ -21,12 +21,45 @@ export function AITutorPanel(props: TutorPanelProps) {
   const pathname = usePathname();
   const { open, onClose } = props;
   const closeButton = useRef<HTMLButtonElement>(null);
+  const dock = useRef<HTMLDivElement>(null);
+  const dragStart = useRef<{ x: number; width: number } | null>(null);
+  const [preferredWidth, setPreferredWidth] = useState(330);
+  const [availableWidth, setAvailableWidth] = useState<number>();
+  const maxWidth = availableWidth === undefined ? 720 : Math.min(720, availableWidth > 700 ? availableWidth - 320 : availableWidth);
+  const minWidth = Math.min(280, maxWidth);
+
+  function clampWidth(width: number) {
+    return Math.min(maxWidth, Math.max(minWidth, width));
+  }
+
+  const width = clampWidth(preferredWidth);
+
+  useEffect(() => {
+    const workspace = dock.current?.parentElement;
+    if (!workspace) return;
+    const observer = new ResizeObserver(() => setAvailableWidth(workspace.clientWidth));
+    observer.observe(workspace);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (open && !userId) closeButton.current?.focus();
   }, [open, userId, isLoaded]);
 
-  return <aside className="ai-panel" id="ai-panel" aria-labelledby="ai-title" hidden={!open}
+  function resizeWithKeyboard(event: KeyboardEvent<HTMLDivElement>) {
+    let nextWidth;
+    switch (event.key) {
+      case "ArrowLeft": nextWidth = width + 24; break;
+      case "ArrowRight": nextWidth = width - 24; break;
+      case "Home": nextWidth = minWidth; break;
+      case "End": nextWidth = maxWidth; break;
+      default: return;
+    }
+    event.preventDefault();
+    setPreferredWidth(clampWidth(nextWidth));
+  }
+
+  return <div ref={dock} className="ai-panel-dock" hidden={!open} style={{ width: `min(100%, ${width}px)` }}
     onKeyDown={(event) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -34,18 +67,36 @@ export function AITutorPanel(props: TutorPanelProps) {
         onClose();
       }
     }}>
-    <div className="ai-panel-title">
-      <Sparkles size={19} aria-hidden="true" /><h2 id="ai-title">AI tutor</h2>
-      {userId && <UserButton />}
-      <button ref={closeButton} type="button" className="editor-tool" aria-label="Close AI tutor" onClick={onClose}><X size={19} /></button>
+    <div className="ai-panel-resize" role="separator" tabIndex={0} aria-label="AI tutor width"
+      aria-orientation="vertical" aria-controls="ai-panel" aria-valuemin={minWidth} aria-valuemax={maxWidth} aria-valuenow={width}
+      onKeyDown={resizeWithKeyboard}
+      onPointerDown={(event) => {
+        if (!event.isPrimary || event.button !== 0) return;
+        dragStart.current = { x: event.clientX, width };
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }}
+      onPointerMove={(event) => {
+        const start = dragStart.current;
+        if (!start || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+        setPreferredWidth(clampWidth(start.width + start.x - event.clientX));
+      }}
+      onLostPointerCapture={() => { dragStart.current = null; }}>
+      <GripVertical size={16} aria-hidden="true" />
     </div>
-    {!isLoaded ? <p role="status" className="ai-notice">Loading account…</p> : userId
-      ? <TutorConversation key={userId} {...props} />
-      : <>
-        <p className="ai-notice">Sign in or create an account to use the AI tutor.</p>
-        <div className="ai-account-actions"><AccountControls returnTo={pathname} /></div>
-      </>}
-  </aside>;
+    <aside className="ai-panel" id="ai-panel" aria-labelledby="ai-title">
+      <div className="ai-panel-title">
+        <Sparkles size={19} aria-hidden="true" /><h2 id="ai-title">AI tutor</h2>
+        {userId && <UserButton />}
+        <button ref={closeButton} type="button" className="editor-tool" aria-label="Close AI tutor" onClick={onClose}><X size={19} /></button>
+      </div>
+      {!isLoaded ? <p role="status" className="ai-notice">Loading account…</p> : userId
+        ? <TutorConversation key={userId} {...props} />
+        : <>
+          <p className="ai-notice">Sign in or create an account to use the AI tutor.</p>
+          <div className="ai-account-actions"><AccountControls returnTo={pathname} /></div>
+        </>}
+    </aside>
+  </div>;
 }
 
 function TutorConversation({ open, note, pageId, selection, provider, onRemoveSelection }: TutorPanelProps) {
@@ -62,6 +113,7 @@ function TutorConversation({ open, note, pageId, selection, provider, onRemoveSe
   const activeRequest = useRef<AbortController | null>(null);
   const live = provider.requiresConsent === true;
   const canSend = !live || (usage?.remaining ?? 0) > 0;
+  const sendDisabled = !draft.trim() || !!pending || !canSend;
   const selectionPage = selection ? note.pages.findIndex((page) => page.id === selection.pageId) + 1 : 0;
 
   useEffect(() => {
@@ -188,9 +240,14 @@ function TutorConversation({ open, note, pageId, selection, provider, onRemoveSe
         </div>}
       </div>
       <label className="field">Question<textarea ref={composer} value={draft} maxLength={maxTutorMessageLength} readOnly={!!pending}
-        onChange={(event) => setDraft(event.currentTarget.value)} rows={2} placeholder="Ask about this note" /></label>
+        onChange={(event) => setDraft(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+          event.preventDefault();
+          if (!event.repeat && !sendDisabled) event.currentTarget.form?.requestSubmit();
+        }} rows={2} placeholder="Ask about this note" /></label>
       {error && <p className="error-text" role="alert">{error}</p>}
-      <button className="button button-primary" disabled={!draft.trim() || !!pending || !canSend}>Send question</button>
+      <button type="submit" className="button button-primary" disabled={sendDisabled}>Send question</button>
       <span className="visually-hidden" role="status">{pending ? live ? "Waiting for Nova Lite" : "Preparing a sample reply" : ""}</span>
     </form>
   </>;

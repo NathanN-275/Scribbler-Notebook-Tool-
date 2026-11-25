@@ -1,7 +1,7 @@
 import { BedrockRuntimeClient, ConverseStreamCommand, type ContentBlock } from "@aws-sdk/client-bedrock-runtime";
 import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider";
 import { auth } from "@clerk/nextjs/server";
-import { maxTutorMessageLength, type AIMessage } from "../../../lib/ai-tutor";
+import { maxTutorMessageLength, maxTutorReplyHistoryLength, type AIMessage } from "../../../lib/ai-tutor";
 import { tutorQuota } from "../../../lib/tutor-quota";
 
 export const runtime = "nodejs";
@@ -10,11 +10,11 @@ export const maxDuration = 60;
 const maxBodyBytes = 4_000_000;
 const maxImageCharacters = 3_000_000;
 const modelId = "amazon.nova-lite-v1:0";
-const maxReplyTokens = 256;
+const maxReplyTokens = 1024;
 const tutorInstructions = [
   "You are Scribbler's study tutor. Lead with the answer unless the learner asks for a hint.",
-  "For simple questions such as basic arithmetic, answer in one short line unless the learner asks to see the work.",
-  "For questions that need reasoning, show only the steps needed to understand the answer. Skip greetings, repetition, and closing offers.",
+  "For simple questions, give a short answer and add a brief explanation when it helps the learner understand why.",
+  "For more involved questions, show the steps needed to understand the answer. Give more detail when the learner asks for it. Skip greetings, repetition, and closing offers.",
   "Use the supplied note pages as evidence and cite the relevant page numbers. Say when the note does not contain enough information.",
 ].join(" ");
 
@@ -47,7 +47,8 @@ function isValidPayload(value: unknown): value is TutorPayload {
     payload.messages.length >= 1 && payload.messages.length <= 20 &&
     payload.messages[0]?.role === "user" && payload.messages[payload.messages.length - 1]?.role === "user" &&
     !payload.messages.some((message) => !message || !["user", "assistant"].includes(message.role) ||
-      typeof message.content !== "string" || message.content.length > maxTutorMessageLength ||
+      typeof message.content !== "string" ||
+      message.content.length > (message.role === "assistant" ? maxTutorReplyHistoryLength : maxTutorMessageLength) ||
       (message.role === "user" && !message.content.trim())) &&
     !payload.pages.some((page) => !isEncodedPage(page)) &&
     new Set(payload.pages.map((page) => page.number)).size === payload.pages.length &&
@@ -169,7 +170,8 @@ export async function POST(request: Request) {
           for await (const event of result.stream ?? []) {
             const text = event.contentBlockDelta?.delta?.text;
             if (text) controller.enqueue(encoder.encode(text));
-            const error = event.modelStreamErrorException ?? event.internalServerException ?? event.throttlingException ?? event.validationException;
+            const error = event.modelStreamErrorException ?? event.internalServerException ?? event.serviceUnavailableException ??
+              event.throttlingException ?? event.validationException;
             if (error) throw new Error(error.message ?? "The model stream failed.");
           }
           controller.close();
