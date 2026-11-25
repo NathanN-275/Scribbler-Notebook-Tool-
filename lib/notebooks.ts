@@ -210,20 +210,23 @@ export async function deleteFolderAndUnfileNotes(folderId: string) {
   });
 }
 
-export async function moveNoteToTrash(noteId: string) {
+export async function moveNotesToTrash(noteIds: readonly string[]) {
   const db = await database();
   return new Promise<void>((resolve, reject) => {
     const transaction = db.transaction(["notes", "trash"], "readwrite");
-    const noteStore = transaction.objectStore("notes");
-    const request = noteStore.get(noteId);
-    request.onsuccess = () => {
-      if (!request.result) { transaction.abort(); return; }
-      transaction.objectStore("trash").put({ id: noteId, deletedAt: Date.now(), note: request.result as Note });
-      noteStore.delete(noteId);
-    };
+    const notes = transaction.objectStore("notes");
+    const trash = transaction.objectStore("trash");
+    const deletedAt = Date.now();
+    for (const id of new Set(noteIds)) {
+      const request = notes.get(id);
+      request.onsuccess = () => {
+        if (!request.result) { transaction.abort(); return; }
+        trash.put({ id, deletedAt, note: request.result as Note });
+        notes.delete(id);
+      };
+    }
     transaction.oncomplete = () => resolve();
-    transaction.onabort = () => reject(transaction.error ?? new Error("Couldn’t move this note to Trash."));
-    transaction.onerror = () => reject(transaction.error ?? new Error("Couldn’t move this note to Trash."));
+    transaction.onabort = () => reject(transaction.error ?? new Error("Couldn’t move the notes to Trash."));
   });
 }
 

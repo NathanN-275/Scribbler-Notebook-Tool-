@@ -5,7 +5,7 @@ import Link from "next/link";
 import { BookOpen, Bookmark, BookMarked, Check, ChevronLeft, ChevronRight, Copy, Download, Eraser, FileText, Hand, Keyboard, Lasso, Pencil, PenTool, Plus, Redo2, Settings, Sparkles, Trash2, Type, Undo2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
 import { defaultEditorSettings, newPage, nextUntitledNoteName, readEditorSettings, readLibrary, readNote, saveEditorSettings, saveNote, storageFailureMessage, type EditorSettings, type Note, type Page, type StudyItem } from "../lib/notebooks";
 import { downloadBlob, makePdf, prepareFilePages, renderPageBlob } from "../lib/files";
-import { mockAIProvider, type AIAttachment } from "../lib/ai-tutor";
+import { bedrockAIProvider, mockAIProvider, type AIAttachment } from "../lib/ai-tutor";
 import { AITutorPanel } from "./ai-tutor-panel";
 import { InkCanvas, type DrawingTool } from "./ink-canvas";
 import type { PageItems } from "../lib/selection";
@@ -43,6 +43,7 @@ type Tool = (typeof tools)[number]["id"];
 type ToolShortcuts = Record<Tool, string>;
 const defaultToolShortcuts: ToolShortcuts = { pen: "q", pencil: "w", eraser: "e", text: "r", pan: "t", lasso: "y" };
 const toolShortcutsStorageKey = "scribbler-tool-shortcuts:v1";
+const aiTutorProvider = process.env.NEXT_PUBLIC_AI_TUTOR_MODE === "live" ? bedrockAIProvider : mockAIProvider;
 type SizedTool = "pen" | "pencil" | "eraser";
 type PaperSettings = Pick<Note, "paper" | "paperSpacing">;
 type PageSnapshot = Pick<Page, "strokes" | "textBoxes">;
@@ -666,7 +667,7 @@ export function NoteEditor({ noteId }: { noteId: string }) {
           <button type="button" className="add-page" onClick={addPage}><Plus size={18} /> Add page</button>
         </nav>
       </main>
-      <AITutorPanel open={aiOpen} note={note} pageId={page.id} selection={aiSelection} provider={mockAIProvider}
+      <AITutorPanel open={aiOpen} note={note} pageId={page.id} selection={aiSelection} provider={aiTutorProvider}
         onRemoveSelection={() => setAiSelection(undefined)} onClose={closeTutor} />
     </div>
     <dialog ref={paperDialog} className="create-dialog create-note-dialog" aria-labelledby="paper-title">

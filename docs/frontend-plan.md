@@ -49,6 +49,12 @@ Build a browser-based note-taking frontend for the cloud computing class project
 
 **Done when:** a user can create a folder and note, reload the browser, and still see them in the library.
 
+#### Library selection and card polish
+
+- Add a red **Delete** button at the right end of the selection bar whenever one or more notes are selected. Reuse the existing Move to Trash confirmation pattern and show the selected note count. Move the selection to recoverable Trash in one IndexedDB transaction, then refresh the library and clear the selection. Canceling leaves the notes and selection in place. If the transaction fails, show an error and keep the selection for retry.
+- Keep note card titles on one line with an ellipsis when they overflow. Reveal the full title in a tooltip on hover or keyboard focus of the note link, without shifting the layout. Preserve the full title for assistive technology. Align the bottom action rows across cards and keep every control visible at narrow widths.
+- Verify single and multiple selection, cancel, and restoration from Trash. Compare short and long titles at desktop and narrow widths, and check that both hovering and tabbing reveal the full truncated title without moving the action row.
+
 ### 3. Note editor and paper
 
 - Build the GoodNotes-inspired editor shell: top bar, toolbar, canvas, page navigation, and AI placeholder panel.

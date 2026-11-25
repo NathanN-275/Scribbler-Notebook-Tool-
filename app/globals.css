@@ -143,6 +143,7 @@ p { line-height: 1.65; }
 .bookmark-filter input { width: 16px; height: 16px; accent-color: var(--green); }
 .library-sort select, .bulk-note-actions select { min-height: 39px; max-width: 180px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--white); color: var(--ink); }
 .bulk-note-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 11px; margin: -13px 0 25px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: #f5f8f1; }
+.bulk-note-delete { margin-inline-start: auto; }
 .bulk-note-actions > span { color: var(--green); font-weight: 750; }
 .restore-dialog { width: min(calc(100% - 26px), 620px); overflow-y: auto; }
 .restore-dialog .dialog-header p { margin-top: 4px; color: var(--muted); font-size: .9rem; }
@@ -170,15 +171,16 @@ p { line-height: 1.65; }
 .note-card[draggable="true"] { cursor: grab; }
 .note-card:active { cursor: grabbing; }
 .note-card-link { display: block; color: inherit; text-decoration: none; }
+.note-card-link:focus-visible { outline-offset: -3px; }
 .note-select { position: absolute; z-index: 1; top: 8px; left: 8px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; background: #fffef3e8; }
 .note-select input { width: 17px; height: 17px; accent-color: var(--green); }
 .note-drag-handle { position: absolute; z-index: 1; top: 10px; right: 9px; display: grid; color: #56665c; opacity: .55; pointer-events: none; }
 .note-bookmark { position: absolute; z-index: 2; top: 6px; right: 31px; display: grid; place-items: center; width: 29px; height: 29px; border: 1px solid var(--line); border-radius: 7px; background: #fffef3e8; color: var(--muted); }
 .note-bookmark.saved { color: var(--green); background: #edf3ea; }
-.note-card-actions { display: flex; justify-content: space-between; align-items: center; gap: 4px; padding: 5px 8px 8px; border-top: 1px solid #edf0e9; }
-.note-move { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); font-size: .78rem; }
-.note-move select { width: min(105px, 26vw); min-height: 31px; padding: 3px 5px; border: 1px solid var(--line); border-radius: 5px; background: var(--white); color: var(--ink); font-size: .77rem; }
-.note-card-actions .icon-button { width: 30px; height: 30px; }
+.note-card-actions { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 4px; margin-top: auto; padding: 5px 8px 8px; border-top: 1px solid #edf0e9; }
+.note-move { min-width: 0; }
+.note-move select { width: 100%; min-width: 0; min-height: 31px; padding: 3px 5px; border: 1px solid var(--line); border-radius: 5px; background: var(--white); color: var(--ink); font-size: .77rem; text-overflow: ellipsis; }
+.note-card-actions .icon-button { width: 28px; height: 30px; }
 .note-delete { color: #87433e; }
 .library-section-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .library-section-heading h2 { margin-bottom: 13px; }
@@ -190,8 +192,12 @@ p { line-height: 1.65; }
 .danger-button:hover { background: #713832; }
 .note-cover { min-height: 106px; display: grid; place-items: center; background: #e8eee2; padding: 12px; }
 .note-cover .paper-sample { width: 62px; height: 78px; display: grid; place-items: center; transform: rotate(-5deg); color: var(--green); box-shadow: 0 3px 8px #193c3120; }
-.note-info { display: grid; gap: 4px; padding: 12px; }
-.note-info strong { overflow-wrap: anywhere; }
+.note-info { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 12px; }
+.note-card-title { position: relative; }
+.note-card-title strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note-info .note-title-tooltip { display: none; position: absolute; z-index: 3; inset-inline: 0; bottom: calc(100% + 4px); padding: 6px 8px; border-radius: 6px; background: var(--ink); color: var(--white); overflow-wrap: anywhere; text-transform: none; }
+.note-card-title:hover .note-title-tooltip,
+.note-card-link:focus .note-title-tooltip { display: block; }
 .note-info span { font-size: .82rem; text-transform: capitalize; color: var(--muted); }
 .note-tag-list { display: flex; flex-wrap: wrap; gap: 4px; }
 .note-info .note-tag { padding: 2px 6px; border: 1px solid #d8e2d6; border-radius: 999px; background: #f2f6ef; color: var(--green); font-size: .72rem; text-transform: none; }

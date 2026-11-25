@@ -8,6 +8,8 @@
     "start": "next start"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1177.0",
+    "@vercel/oidc-aws-credentials-provider": "^3.3.21",
     "docx-preview": "^0.4.1",
     "html2canvas": "^1.4.1",
     "lucide-react": "1.48.0",
