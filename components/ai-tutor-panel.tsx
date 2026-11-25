@@ -42,7 +42,7 @@ export function AITutorPanel(props: TutorPanelProps) {
     {!isLoaded ? <p role="status" className="ai-notice">Loading account…</p> : userId
       ? <TutorConversation key={userId} {...props} />
       : <>
-        <p className="ai-notice">Sign in or create an account to ask up to five questions in 24 hours.</p>
+        <p className="ai-notice">Sign in or create an account to use the AI tutor.</p>
         <div className="ai-account-actions"><AccountControls returnTo={pathname} /></div>
       </>}
   </aside>;
@@ -60,6 +60,8 @@ function TutorConversation({ open, note, pageId, selection, provider, onRemoveSe
   const composer = useRef<HTMLTextAreaElement>(null);
   const transcript = useRef<HTMLDivElement>(null);
   const activeRequest = useRef<AbortController | null>(null);
+  const live = provider.requiresConsent === true;
+  const canSend = !live || (usage?.remaining ?? 0) > 0;
   const selectionPage = selection ? note.pages.findIndex((page) => page.id === selection.pageId) + 1 : 0;
 
   useEffect(() => {
@@ -73,7 +75,7 @@ function TutorConversation({ open, note, pageId, selection, provider, onRemoveSe
   useEffect(() => () => activeRequest.current?.abort(), []);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !live) return;
     const controller = new AbortController();
 
     async function loadUsage() {
@@ -96,20 +98,20 @@ function TutorConversation({ open, note, pageId, selection, provider, onRemoveSe
 
     void loadUsage();
     return () => controller.abort();
-  }, [open, usageRequest]);
+  }, [live, open, usageRequest]);
 
   const nextAvailableAt = usage?.nextAvailableAt;
   useEffect(() => {
-    if (!open || !nextAvailableAt) return;
+    if (!open || !live || !nextAvailableAt) return;
     const timer = window.setTimeout(() => setUsageRequest((value) => value + 1), Math.max(1000, nextAvailableAt - Date.now() + 100));
     return () => window.clearTimeout(timer);
-  }, [open, nextAvailableAt]);
+  }, [live, open, nextAvailableAt]);
 
   async function sendQuestion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const question = draft.trim();
-    if (!question || activeRequest.current || !usage?.remaining) return;
-    if (provider.requiresConsent && !liveConsentConfirmed) {
+    if (!question || activeRequest.current || !canSend) return;
+    if (live && !liveConsentConfirmed) {
       const accepted = window.confirm("Send your question and the pages in this note to Amazon Bedrock for an AI answer?");
       if (!accepted) return;
       setLiveConsentConfirmed(true);
@@ -140,38 +142,40 @@ function TutorConversation({ open, note, pageId, selection, provider, onRemoveSe
       activeRequest.current = null;
       if (!request.signal.aborted) {
         setPending(undefined);
-        setUsageRequest((value) => value + 1);
+        if (live) setUsageRequest((value) => value + 1);
       }
     }
   }
 
   return <>
-    <p className="ai-notice">{provider.requiresConsent
+    <p className="ai-notice">{live
       ? "Your question and note pages are sent to Amazon Bedrock for an answer."
-      : "Demo with sample replies. Your question and page count are sent to Scribbler. Note content stays in this browser."}</p>
-    <div className="ai-notice" role="status">
-      {usage ? <>
-        <p>{usage.remaining} of {usage.limit} questions left</p>
-        {usage.remaining === 0 && nextAvailableAt && <p>Next question available {new Date(nextAvailableAt).toLocaleString(undefined, {
-          month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short",
-        })}.</p>}
-      </> : <p>{usageError || "Checking your tutor allowance…"}</p>}
-    </div>
-    {usageError && <button type="button" className="button button-outline" onClick={() => {
-      setUsageError("");
-      setUsageRequest((value) => value + 1);
-    }}>Retry usage check</button>}
+      : "Sample replies don’t use your live tutor allowance. Your question and page count are sent to Scribbler. Note content stays in this browser."}</p>
+    {live && <>
+      <div className="ai-notice" role="status">
+        {usage ? <>
+          <p>{usage.remaining} of {usage.limit} questions left</p>
+          {usage.remaining === 0 && nextAvailableAt && <p>Next question available {new Date(nextAvailableAt).toLocaleString(undefined, {
+            month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short",
+          })}.</p>}
+        </> : <p>{usageError || "Checking your tutor allowance…"}</p>}
+      </div>
+      {usageError && <button type="button" className="button button-outline" onClick={() => {
+        setUsageError("");
+        setUsageRequest((value) => value + 1);
+      }}>Retry usage check</button>}
+    </>}
     <div className="ai-transcript" ref={transcript} tabIndex={0} aria-label="Tutor conversation">
       <div role="log" aria-label="Messages">
         {messages.map(({ role, content }, index) => <div className={`ai-message ai-message-${role}`} key={index}>
-          <strong>{role === "user" ? "You" : provider.requiresConsent ? "Nova Lite" : "Sample reply"}</strong>
+          <strong>{role === "user" ? "You" : live ? "Nova Lite" : "Sample reply"}</strong>
           <p>{content}</p>
         </div>)}
       </div>
       {pending && <>
         <div className="ai-message ai-message-user"><strong>You</strong><p>{pending.question}</p></div>
-        <div className="ai-message ai-message-assistant" aria-hidden="true"><strong>{provider.requiresConsent ? "Nova Lite" : "Sample reply"}</strong>
-          <p>{pending.reply || (provider.requiresConsent ? "Connecting to Nova Lite…" : "Preparing a sample reply…")}</p>
+        <div className="ai-message ai-message-assistant" aria-hidden="true"><strong>{live ? "Nova Lite" : "Sample reply"}</strong>
+          <p>{pending.reply || (live ? "Connecting to Nova Lite…" : "Preparing a sample reply…")}</p>
         </div>
       </>}
     </div>
@@ -186,8 +190,8 @@ function TutorConversation({ open, note, pageId, selection, provider, onRemoveSe
       <label className="field">Question<textarea ref={composer} value={draft} maxLength={maxTutorMessageLength} readOnly={!!pending}
         onChange={(event) => setDraft(event.currentTarget.value)} rows={2} placeholder="Ask about this note" /></label>
       {error && <p className="error-text" role="alert">{error}</p>}
-      <button className="button button-primary" disabled={!draft.trim() || !!pending || !usage?.remaining}>Send question</button>
-      <span className="visually-hidden" role="status">{pending ? provider.requiresConsent ? "Waiting for Nova Lite" : "Preparing a sample reply" : ""}</span>
+      <button className="button button-primary" disabled={!draft.trim() || !!pending || !canSend}>Send question</button>
+      <span className="visually-hidden" role="status">{pending ? live ? "Waiting for Nova Lite" : "Preparing a sample reply" : ""}</span>
     </form>
   </>;
 }

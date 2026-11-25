@@ -27,15 +27,15 @@ Select the active Eraser again to choose between removing a whole stroke and era
 
 ## AI tutor
 
-Open **AI tutor** in the editor or select strokes or text boxes with Lasso and choose **Ask AI**. Sign in to ask up to five questions per rolling 24 hours across all notes and tutor modes. An accepted question counts even if the reply fails. The panel shows the remaining allowance and when the next slot opens once it is full. The library and note editor are available without signing in.
+Open **AI tutor** in the editor or select strokes or text boxes with Lasso and choose **Ask AI**. Sign in to use either tutor mode. Live mode allows five questions per rolling 24 hours across all notes. An accepted live question counts even if the reply fails. The live panel shows the remaining allowance and when the next slot opens. The library and note editor are available without signing in.
 
-The demo returns sample replies using the current question, page count, and optional selection page number. Note images and handwriting stay in the browser. Live mode sends rendered note pages to Amazon Nova Lite after first-send consent. Chat lasts until you leave or reload the note, or sign out. See the [tutor context decision](docs/adr/0006-on-demand-ai-tutor-context.md) and [account and allowance decision](docs/adr/0007-tutor-auth-and-allowance.md).
+The demo returns sample replies without using the live allowance. It receives the current question, page count, and optional selection page number. Note images and handwriting stay in the browser. Live mode sends rendered note pages to Amazon Nova Lite after first-send consent. Chat lasts until you leave or reload the note, or sign out. See the [tutor context decision](docs/adr/0006-on-demand-ai-tutor-context.md) and [account and allowance decision](docs/adr/0007-tutor-auth-and-allowance.md).
 
 ### Configure Clerk and Upstash
 
 1. Use the keys for the existing **Scribbler-Notebook** Clerk app. Set `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` in `.env.local`. The linked Clerk CLI can pull the development keys with `npx -y clerk@latest env pull`. Clerk’s prebuilt pages use the sign-in methods enabled for that instance.
-2. Create or connect a persistent Upstash Redis database. Set `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` in `.env.local`. Use the standard token so the server can record questions.
-3. Set the same four variables in each Vercel environment using the appropriate Clerk instance and Redis database. Use a separate Redis database for development and production.
+2. For live mode, create or connect a persistent Upstash Redis database. Supply `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` using the standard token so the server can record questions.
+3. Set the Clerk variables in each Vercel environment. Set the Redis variables wherever live mode is enabled and use separate databases for development and production.
 
 ### Enable Nova Lite on a private Vercel preview
 

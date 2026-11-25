@@ -78,7 +78,7 @@ _Avoid_: Scissor selection
 A sequence of questions and replies for one open note during an editor session.
 
 **Tutor allowance**:
-Up to five accepted question submissions per account in the previous 24 hours, shared across notes and tutor modes. Each submission frees one slot 24 hours after it was accepted, even if a reply failed.
+Up to five accepted live tutor questions per account in the previous 24 hours, shared across notes. Each acceptance frees one slot after 24 hours, even if the reply failed.
 
 **Note context**:
 The open note's numbered pages and the page the user is currently viewing, available to the tutor for a question.

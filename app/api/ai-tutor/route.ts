@@ -10,6 +10,13 @@ export const maxDuration = 60;
 const maxBodyBytes = 4_000_000;
 const maxImageCharacters = 3_000_000;
 const modelId = "amazon.nova-lite-v1:0";
+const maxReplyTokens = 256;
+const tutorInstructions = [
+  "You are Scribbler's study tutor. Lead with the answer unless the learner asks for a hint.",
+  "For simple questions such as basic arithmetic, answer in one short line unless the learner asks to see the work.",
+  "For questions that need reasoning, show only the steps needed to understand the answer. Skip greetings, repetition, and closing offers.",
+  "Use the supplied note pages as evidence and cite the relevant page numbers. Say when the note does not contain enough information.",
+].join(" ");
 
 type EncodedPage = { number: number; image: string };
 type TutorPayload = {
@@ -103,8 +110,6 @@ export async function POST(request: Request) {
 
   if (!live) {
     if (!isValidDemoPayload(payload)) return Response.json({ error: "The tutor request is invalid." }, { status: 400 });
-    const blocked = await checkQuota(userId);
-    if (blocked) return blocked;
     const { pageCount, selectionPage } = payload;
     const scope = pageCount === 1 ? "The open note has one page." : `The open note has ${pageCount} pages.`;
     const focus = selectionPage ? ` Your selection is on page ${selectionPage}.` : "";
@@ -152,9 +157,9 @@ export async function POST(request: Request) {
     }));
     const result = await client.send(new ConverseStreamCommand({
       modelId,
-      system: [{ text: "You are Scribbler's study tutor. Use supplied note pages as evidence, cite page numbers, and say when the note does not contain enough information. Explain clearly and help the learner reason through the work." }],
+      system: [{ text: tutorInstructions }],
       messages,
-      inferenceConfig: { maxTokens: 1200, temperature: 0.3 },
+      inferenceConfig: { maxTokens: maxReplyTokens, temperature: 0.3 },
     }), { abortSignal: request.signal });
 
     const encoder = new TextEncoder();

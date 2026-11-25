@@ -4,7 +4,7 @@ The AI tutor answers questions about the open note, whose handwriting and import
 
 ## Local demo
 
-Both tutor entry points use the same tutor panel. The lasso sends a snapshot of selected objects to the composer. It can be removed, replaced with a new selection, or cleared by reopening the panel with the general tutor button. Closing the note or reloading discards the conversation. The sample mode now uses the same authenticated endpoint and allowance as live mode, as described in [ADR 0007](0007-tutor-auth-and-allowance.md).
+Both tutor entry points use the same tutor panel. The lasso sends a snapshot of selected objects to the composer. It can be removed, replaced with a new selection, or cleared by reopening the panel with the general tutor button. Closing the note or reloading discards the conversation. Sample replies use the authenticated endpoint and leave the live allowance available, as described in [ADR 0007](0007-tutor-auth-and-allowance.md).
 
 ## Live Bedrock connection
 
