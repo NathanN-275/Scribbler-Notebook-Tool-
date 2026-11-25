@@ -1,6 +1,8 @@
 import { BedrockRuntimeClient, ConverseStreamCommand, type ContentBlock } from "@aws-sdk/client-bedrock-runtime";
 import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider";
+import { auth } from "@clerk/nextjs/server";
 import { maxTutorMessageLength, type AIMessage } from "../../../lib/ai-tutor";
+import { tutorQuota } from "../../../lib/tutor-quota";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -17,6 +19,17 @@ type TutorPayload = {
   selection?: EncodedPage;
   messages: AIMessage[];
 };
+type DemoPayload = { question: string; pageCount: number; selectionPage?: number };
+const noStore = { "Cache-Control": "no-store" };
+const replyHeaders = { ...noStore, "Content-Type": "text/plain; charset=utf-8" };
+
+function isValidDemoPayload(value: unknown): value is DemoPayload {
+  if (!value || typeof value !== "object") return false;
+  const { question, pageCount, selectionPage } = value as DemoPayload;
+  return typeof question === "string" && question.trim().length > 0 && question.length <= maxTutorMessageLength &&
+    Number.isSafeInteger(pageCount) && pageCount > 0 &&
+    (selectionPage === undefined || (Number.isSafeInteger(selectionPage) && selectionPage > 0 && selectionPage <= pageCount));
+}
 
 function isValidPayload(value: unknown): value is TutorPayload {
   if (!value || typeof value !== "object") return false;
@@ -27,7 +40,8 @@ function isValidPayload(value: unknown): value is TutorPayload {
     payload.messages.length >= 1 && payload.messages.length <= 20 &&
     payload.messages[0]?.role === "user" && payload.messages[payload.messages.length - 1]?.role === "user" &&
     !payload.messages.some((message) => !message || !["user", "assistant"].includes(message.role) ||
-      typeof message.content !== "string" || message.content.length > maxTutorMessageLength) &&
+      typeof message.content !== "string" || message.content.length > maxTutorMessageLength ||
+      (message.role === "user" && !message.content.trim())) &&
     !payload.pages.some((page) => !isEncodedPage(page)) &&
     new Set(payload.pages.map((page) => page.number)).size === payload.pages.length &&
     payload.pages.some((page) => page.number === payload.currentPageNumber) &&
@@ -42,11 +56,33 @@ function isEncodedPage(value: unknown): value is EncodedPage {
     page.image.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(page.image);
 }
 
-export async function POST(request: Request) {
-  if (process.env.VERCEL_ENV !== "preview" || process.env.AI_TUTOR_ENABLED !== "true") {
-    return Response.json({ error: "The AI tutor is not enabled yet." }, { status: 503 });
+async function checkQuota(userId: string) {
+  try {
+    const { accepted, usage } = await tutorQuota(userId, true);
+    if (accepted) return;
+    const retryAfter = Math.max(1, Math.ceil(((usage.nextAvailableAt ?? Date.now()) - Date.now()) / 1000));
+    return Response.json({ error: "You’ve used all five tutor questions.", usage }, {
+      status: 429,
+      headers: { ...noStore, "Retry-After": String(retryAfter) },
+    });
+  } catch {
+    return Response.json({ error: "The tutor question limit is temporarily unavailable." }, { status: 503, headers: noStore });
   }
-  if (Number(request.headers.get("content-length") ?? 0) > maxBodyBytes) {
+}
+
+export async function POST(request: Request) {
+  const { userId } = await auth();
+  if (!userId) return Response.json({ error: "Sign in to use the AI tutor." }, { status: 401, headers: noStore });
+
+  const live = process.env.NEXT_PUBLIC_AI_TUTOR_MODE === "live";
+  if (live && (process.env.VERCEL_ENV !== "preview" || process.env.AI_TUTOR_ENABLED !== "true")) {
+    return Response.json({ error: "The live AI tutor is not enabled yet." }, { status: 503 });
+  }
+  if (request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/json") {
+    return Response.json({ error: "Tutor requests must use JSON." }, { status: 415 });
+  }
+  const bodyLimit = live ? maxBodyBytes : 20_000;
+  if (Number(request.headers.get("content-length") ?? 0) > bodyLimit) {
     return Response.json({ error: "The note is too large to send." }, { status: 413 });
   }
   let rawBody: string;
@@ -55,7 +91,7 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ error: "The request could not be read." }, { status: 400 });
   }
-  if (Buffer.byteLength(rawBody, "utf8") > maxBodyBytes) {
+  if (Buffer.byteLength(rawBody, "utf8") > bodyLimit) {
     return Response.json({ error: "The note is too large to send." }, { status: 413 });
   }
   let payload: unknown;
@@ -64,6 +100,17 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ error: "The request could not be read." }, { status: 400 });
   }
+
+  if (!live) {
+    if (!isValidDemoPayload(payload)) return Response.json({ error: "The tutor request is invalid." }, { status: 400 });
+    const blocked = await checkQuota(userId);
+    if (blocked) return blocked;
+    const { pageCount, selectionPage } = payload;
+    const scope = pageCount === 1 ? "The open note has one page." : `The open note has ${pageCount} pages.`;
+    const focus = selectionPage ? ` Your selection is on page ${selectionPage}.` : "";
+    return new Response(`${scope}${focus} A live tutor could use this context to answer your question.`, { headers: replyHeaders });
+  }
+
   if (!isValidPayload(payload)) {
     return Response.json({ error: "The tutor request is invalid or too large." }, { status: 400 });
   }
@@ -73,6 +120,9 @@ export async function POST(request: Request) {
   if (!region || !roleArn) {
     return Response.json({ error: "Bedrock access is not configured yet." }, { status: 503 });
   }
+
+  const blocked = await checkQuota(userId);
+  if (blocked) return blocked;
 
   try {
     const client = new BedrockRuntimeClient({
@@ -123,7 +173,7 @@ export async function POST(request: Request) {
         }
       },
     });
-    return new Response(stream, { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+    return new Response(stream, { headers: replyHeaders });
   } catch {
     return Response.json({ error: "Bedrock could not answer. Check the AWS role, Region, and model access." }, { status: 502 });
   }

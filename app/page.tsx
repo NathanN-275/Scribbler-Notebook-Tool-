@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { BookOpen, CircleCheck, Eraser, FolderOpen, Lasso, Pencil, PenTool, Plus, Sparkles, Undo2 } from "lucide-react";
 import { Brand } from "../components/brand";
+import { AccountControls } from "../components/account-controls";
 
 const features = [
   { title: "Write it your way", text: "Draw with pen or pencil on plain, lined, graph, or dotted paper. Use a mouse or write right on your touchscreen.", Icon: Pencil },
   { title: "Keep your notes together", text: "Organize notes in folders, add pages as you go, and pick up where you left off in the same browser.", Icon: FolderOpen },
-  { title: "Get help when you’re stuck", text: "A planned AI tutor will explain handwritten work, give hints, and help you practice.", Icon: Sparkles },
+  { title: "Get help when you’re stuck", text: "Create an account to try the AI tutor with up to five questions in 24 hours.", Icon: Sparkles },
 ];
 
 function NotebookPreview() {
@@ -50,6 +51,7 @@ export default function Home() {
           <nav aria-label="Main navigation">
             <Link className="text-link" href="#features">Features</Link>
             <Link className="button button-outline" href="/library">Open library</Link>
+            <AccountControls returnTo="/library" />
           </nav>
         </div>
       </header>

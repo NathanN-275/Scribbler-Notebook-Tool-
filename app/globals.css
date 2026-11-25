@@ -405,6 +405,7 @@ kbd { display: inline-block; padding: 2px 5px; border: 1px solid #d1d9cf; border
 .ai-panel-title { display: flex; align-items: center; gap: 8px; color: var(--green); }
 .ai-panel-title h2 { flex: 1; font-size: 1rem; }
 .ai-notice { color: var(--muted); font-size: .83rem; }
+.ai-account-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .ai-transcript { flex: 1; min-height: 80px; overflow: auto; }
 .ai-message { margin-bottom: 8px; padding: 8px 10px; border-radius: 8px; background: #edf2e9; font-size: .9rem; }
 .ai-message-user { margin-left: 16px; background: #e3eee5; }
@@ -470,6 +471,8 @@ kbd { display: inline-block; padding: 2px 5px; border: 1px solid #d1d9cf; border
 }
 @media (max-width: 420px) {
   .site-nav .text-link { display: none; }
+  .site-nav { flex-wrap: wrap; padding-block: 10px; }
+  .site-nav nav { flex-wrap: wrap; gap: 8px; }
   .preview-desk { padding-inline: 20px; }
   .editor-back span, .assistant-toggle span { display: none; }
   .editor-back { min-width: 38px; justify-content: center; }

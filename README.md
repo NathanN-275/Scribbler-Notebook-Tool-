@@ -27,7 +27,15 @@ Select the active Eraser again to choose between removing a whole stroke and era
 
 ## AI tutor
 
-Open **AI tutor** in the editor or select strokes or text boxes with Lasso and choose **Ask AI** to attach them. The local demo streams sample replies. The live option sends rendered note pages to Amazon Nova Lite through a same-origin Vercel Function; the first live send asks for confirmation. Chat lasts until you leave or reload the note. See the [tutor context decision](docs/adr/0006-on-demand-ai-tutor-context.md).
+Open **AI tutor** in the editor or select strokes or text boxes with Lasso and choose **Ask AI**. Sign in to ask up to five questions per rolling 24 hours across all notes and tutor modes. An accepted question counts even if the reply fails. The panel shows the remaining allowance and when the next slot opens once it is full. The library and note editor are available without signing in.
+
+The demo returns sample replies using the current question, page count, and optional selection page number. Note images and handwriting stay in the browser. Live mode sends rendered note pages to Amazon Nova Lite after first-send consent. Chat lasts until you leave or reload the note, or sign out. See the [tutor context decision](docs/adr/0006-on-demand-ai-tutor-context.md) and [account and allowance decision](docs/adr/0007-tutor-auth-and-allowance.md).
+
+### Configure Clerk and Upstash
+
+1. Use the keys for the existing **Scribbler-Notebook** Clerk app. Set `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` in `.env.local`. The linked Clerk CLI can pull the development keys with `npx -y clerk@latest env pull`. Clerk’s prebuilt pages use the sign-in methods enabled for that instance.
+2. Create or connect a persistent Upstash Redis database. Set `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` in `.env.local`. Use the standard token so the server can record questions.
+3. Set the same four variables in each Vercel environment using the appropriate Clerk instance and Redis database. Use a separate Redis database for development and production.
 
 ### Enable Nova Lite on a private Vercel preview
 
@@ -45,8 +53,8 @@ Open **AI tutor** in the editor or select strokes or text boxes with Lasso and c
 
 5. Redeploy and confirm a signed-out request to `/api/ai-tutor` cannot reach the route. Sign in and test with a throwaway note containing handwriting. Confirm first-send consent, streamed replies and a follow-up. Check AWS Billing after the smoke test.
 
-OIDC gives the function temporary credentials. The route requires Vercel's `VERCEL_ENV=preview` and the server enable flag. Public production and local development use the demo. Keep Bedrock model invocation logging off for note content. To pause the preview, disable the live flags and redeploy. Revoke the role's Bedrock permission to stop older previews immediately.
+OIDC gives the function temporary credentials. Live mode requires Vercel's `VERCEL_ENV=preview` and the server enable flag. Public production and local development use the demo. Keep Bedrock model invocation logging off for note content. To pause the preview, disable the live flags and redeploy. Revoke the role's Bedrock permission to stop older previews immediately.
 
 ## Vercel
 
-Import the repository as a Next.js project. The frontend needs no environment variables. See [Next.js on Vercel](https://vercel.com/docs/frameworks/full-stack/nextjs).
+Import the repository as a Next.js project and configure Clerk and Upstash as described above. See [Next.js on Vercel](https://vercel.com/docs/frameworks/full-stack/nextjs).

@@ -14,6 +14,7 @@ export const maxTutorMessageLength = 3000;
 
 export type AIMessage = { role: "user" | "assistant"; content: string };
 export type AIRequest = { context: AIContext; messages: readonly AIMessage[] };
+export type TutorUsage = { limit: number; remaining: number; nextAvailableAt: number | null };
 
 export interface AIProvider {
   requiresConsent?: boolean;
@@ -31,17 +32,13 @@ export function createAIContext(note: Note, currentPageId: string, selection?: A
 }
 
 export const mockAIProvider: AIProvider = {
-  async *streamReply({ context }, signal) {
-    const selectionPage = context.pages.find(({ page }) => page.id === context.selection?.pageId);
-    const pageCount = context.pages.length;
-    const scope = pageCount === 1 ? "The open note has one page." : `The open note has ${pageCount} pages.`;
-    const focus = selectionPage ? ` Your selection on page ${selectionPage.number} is attached.` : "";
-    const reply = `${scope}${focus} A live tutor could use this context to answer your question.`;
-    for (const [index, word] of reply.split(" ").entries()) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 45));
-      signal.throwIfAborted();
-      yield index === 0 ? word : ` ${word}`;
-    }
+  async *streamReply({ context, messages }, signal) {
+    const selectionPage = context.pages.find(({ page }) => page.id === context.selection?.pageId)?.number;
+    yield* streamTutorReply(JSON.stringify({
+      question: messages.at(-1)?.content,
+      pageCount: context.pages.length,
+      selectionPage,
+    }), signal);
   },
 };
 
@@ -107,27 +104,31 @@ export const bedrockAIProvider: AIProvider = {
     }
     if (body.length > maxRequestCharacters) throw new Error("This page is too large to send to Nova Lite.");
 
-    const response = await fetch("/api/ai-tutor", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body,
-      signal,
-    });
-    if (!response.ok) {
-      const result = await response.json().catch(() => undefined) as { error?: string } | undefined;
-      throw new Error(result?.error ?? "Nova Lite couldn’t answer. Try again later.");
-    }
-    if (!response.body) throw new Error("Nova Lite returned no response.");
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const text = decoder.decode(value, { stream: true });
-      if (text) yield text;
-    }
-    const last = decoder.decode();
-    if (last) yield last;
+    yield* streamTutorReply(body, signal);
   },
 };
+
+async function* streamTutorReply(body: string, signal: AbortSignal) {
+  const response = await fetch("/api/ai-tutor", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+    signal,
+  });
+  if (!response.ok) {
+    const result = await response.json().catch(() => undefined) as { error?: string } | undefined;
+    throw new Error(result?.error ?? "The tutor couldn’t answer. Try again later.");
+  }
+  if (!response.body) throw new Error("The tutor returned no response.");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const text = decoder.decode(value, { stream: true });
+    if (text) yield text;
+  }
+  const last = decoder.decode();
+  if (last) yield last;
+}
