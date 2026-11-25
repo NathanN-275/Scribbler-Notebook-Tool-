@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type TouchEvent as ReactTouchEvent } from "react";
 import { ClipboardPaste, Copy, RotateCw, Sparkles, Trash2 } from "lucide-react";
 import type { EraserMode, Page, PaperType, Point, Stroke, TextBox } from "../lib/notebooks";
-import { caughtByLasso, caughtPolygonByLasso, drawStroke, eraseStrokePoints, hitsStroke, pageHeight, pageWidth } from "../lib/ink";
+import { caughtByLasso, caughtPolygonByLasso, closestStrokeAt, drawStroke, eraseStrokePoints, hitsStroke, pageHeight, pageWidth } from "../lib/ink";
 import { boxCenter, hitsTextBox, selectionBounds, selectionTransform, textBoxCorners, transformBox, transformStroke, transformTextBox, type Bounds, type PageItems, type SelectionTransform } from "../lib/selection";
 import { paperStyle } from "./paper-controls";
 
@@ -18,17 +18,49 @@ type TransformAction = "move" | "resize" | "rotate";
 type TransformGesture = {
   type: "transform"; action: TransformAction; start: Point; ids: Set<string>; transform: SelectionTransform;
 };
+type LassoGesture = { type: "lasso"; boundary: Point[]; dragged: boolean };
 type Gesture = { pointerId: number; last: Point } & (
   | { type: "draw"; stroke: Stroke }
   | EraseGesture
-  | { type: "lasso"; boundary: Point[] }
+  | LassoGesture
   | TransformGesture
   | { type: "pan"; start: Point; scrollLeft: number; scrollTop: number }
 );
 type TouchZoomGesture = { distance: number; zoom: number; contentX: number; contentY: number };
+type PointerPosition = Pick<PointerEvent<HTMLElement>, "clientX" | "clientY">;
 
 const textPlaceholder = "type something...";
 const pasteOffset = 24;
+
+function drawLassoBoundary(ctx: CanvasRenderingContext2D, boundary: Point[], pageUnitsPerPixel: number) {
+  if (boundary.length < 2) return;
+  const first = boundary[0];
+  const last = boundary[boundary.length - 1];
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(first.x, first.y);
+  for (let i = 1; i < boundary.length; i++) ctx.lineTo(boundary[i].x, boundary[i].y);
+  if (boundary.length >= 3) {
+    ctx.fillStyle = "rgba(59, 133, 98, .10)";
+    ctx.fill("evenodd");
+  }
+  ctx.strokeStyle = "#397c5a";
+  ctx.lineWidth = 1.75 * pageUnitsPerPixel;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.stroke();
+
+  if (boundary.length >= 3) {
+    ctx.beginPath();
+    ctx.moveTo(last.x, last.y);
+    ctx.lineTo(first.x, first.y);
+    ctx.setLineDash([4 * pageUnitsPerPixel, 4 * pageUnitsPerPixel]);
+    ctx.globalAlpha = .55;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
 
 function boxStyle(box: Bounds, angle = 0): CSSProperties {
   return {
@@ -67,6 +99,7 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
   const canvas = useRef<HTMLCanvasElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const gesture = useRef<Gesture | null>(null);
+  const lassoPaintFrame = useRef<number | null>(null);
   const touchZoomGesture = useRef<TouchZoomGesture | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [preview, setPreview] = useState<SelectionTransform>();
@@ -82,6 +115,11 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
   const selected = useMemo(() => new Set([...selection.strokes, ...selection.textBoxes].map((item) => item.id)), [selection]);
   const bounds = useMemo(() => selectionBounds(selection), [selection]);
   const backgroundUrl = useMemo(() => page.background ? URL.createObjectURL(page.background) : undefined, [page.background]);
+  const cancelLassoPaint = useCallback(() => {
+    if (lassoPaintFrame.current === null) return;
+    cancelAnimationFrame(lassoPaintFrame.current);
+    lassoPaintFrame.current = null;
+  }, []);
 
   useEffect(() => { setSelectedIds([]); }, [tool.type]);
   useEffect(() => () => { if (backgroundUrl) URL.revokeObjectURL(backgroundUrl); }, [backgroundUrl]);
@@ -176,16 +214,7 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
     }
     if (current?.type === "draw") drawStroke(ctx, current.stroke, false);
     if (current?.type === "lasso") {
-      ctx.beginPath();
-      current.boundary.forEach((point, index) => index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y));
-      ctx.closePath();
-      ctx.fillStyle = "rgba(59, 133, 98, .12)";
-      ctx.fill();
-      ctx.strokeStyle = "#397c5a";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 4]);
-      ctx.stroke();
-      ctx.setLineDash([]);
+      drawLassoBoundary(ctx, current.boundary, pageWidth / Math.max(1, element.getBoundingClientRect().width));
     }
   }, [page, selected]);
 
@@ -204,14 +233,49 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
     resize();
     const observer = new ResizeObserver(resize);
     observer.observe(element);
-    return () => observer.disconnect();
-  }, [paint]);
+    return () => {
+      observer.disconnect();
+      cancelLassoPaint();
+    };
+  }, [cancelLassoPaint, paint]);
 
-  function pointOnPage(event: PointerEvent<HTMLElement>, clamp = true): Point {
-    const rect = canvas.current!.getBoundingClientRect();
+  function pointOnPage(event: PointerPosition, clamp = true, rect = canvas.current!.getBoundingClientRect()): Point {
     const x = (event.clientX - rect.left) * pageWidth / rect.width;
     const y = (event.clientY - rect.top) * pageHeight / rect.height;
     return clamp ? { x: Math.max(0, Math.min(pageWidth, x)), y: Math.max(0, Math.min(pageHeight, y)) } : { x, y };
+  }
+
+  function lassoHitRadius(event: PointerEvent<HTMLElement>) {
+    const screenRadius = event.pointerType === "touch" ? 10 : 5;
+    return screenRadius * pageWidth / Math.max(1, canvas.current!.getBoundingClientRect().width);
+  }
+
+  function trackLasso(current: Extract<Gesture, { type: "lasso" }>, event: PointerEvent<HTMLElement>, final = false) {
+    const rect = canvas.current!.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const pageUnitsPerPixel = pageWidth / rect.width;
+    const first = current.boundary[0];
+    const previousLength = current.boundary.length;
+
+    function addPoint(sample: PointerPosition, minimumDistance: number) {
+      const point = pointOnPage(sample, true, rect);
+      if (Math.hypot(point.x - current.last.x, point.y - current.last.y) <= minimumDistance) return;
+      current.boundary.push(point);
+      current.last = point;
+      current.dragged ||= Math.hypot(point.x - first.x, point.y - first.y) > 3 * pageUnitsPerPixel;
+    }
+
+    if (!final) {
+      for (const sample of event.nativeEvent.getCoalescedEvents?.() ?? []) addPoint(sample, .5 * pageUnitsPerPixel);
+    }
+    addPoint(event, final ? 0 : .5 * pageUnitsPerPixel);
+
+    if (!final && current.boundary.length !== previousLength && lassoPaintFrame.current === null) {
+      lassoPaintFrame.current = requestAnimationFrame(() => {
+        lassoPaintFrame.current = null;
+        paint();
+      });
+    }
   }
 
   function beginTouchZoom(event: ReactTouchEvent<HTMLDivElement>) {
@@ -220,6 +284,7 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
     const centerX = (first.clientX + second.clientX) / 2;
     const centerY = (first.clientY + second.clientY) / 2;
     const rect = event.currentTarget.getBoundingClientRect();
+    cancelLassoPaint();
     gesture.current = null;
     setPreview(undefined);
     paint();
@@ -296,10 +361,13 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
       startTransform(event, "move", new Set([hitBox.id]), point);
       return;
     }
-    if (tool.type === "lasso" && (hitBox && selected.has(hitBox.id) ||
-      selection.strokes.some((stroke) => hitsStroke(stroke, point, point, 12)))) {
-      startTransform(event, "move", selected, point);
-      return;
+    if (tool.type === "lasso") {
+      const canMoveBox = hitBox && selected.has(hitBox.id);
+      const radius = lassoHitRadius(event);
+      if (canMoveBox || selection.strokes.some((stroke) => hitsStroke(stroke, point, point, radius))) {
+        startTransform(event, "move", selected, point);
+        return;
+      }
     }
     event.currentTarget.setPointerCapture(event.pointerId);
     if (tool.type === "pen" || tool.type === "pencil") {
@@ -313,7 +381,7 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
       gesture.current = { ...base, type: "pan", start: { x: event.clientX, y: event.clientY }, scrollLeft: scroll.current?.scrollLeft ?? 0, scrollTop: scroll.current?.scrollTop ?? 0 };
     } else if (tool.type === "lasso") {
       setSelectedIds([]);
-      gesture.current = { ...base, type: "lasso", boundary: [point] };
+      gesture.current = { ...base, type: "lasso", boundary: [point], dragged: false };
     }
     paint();
   }
@@ -321,6 +389,10 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
   function updateGesture(event: PointerEvent<HTMLElement>) {
     const current = gesture.current;
     if (!current || current.pointerId !== event.pointerId) return;
+    if (current.type === "lasso") {
+      trackLasso(current, event);
+      return;
+    }
     const point = pointOnPage(event, current.type !== "transform");
     if (current.type === "pan") {
       if (scroll.current) {
@@ -332,7 +404,6 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
     }
     if (point.x === current.last.x && point.y === current.last.y) return;
     if (current.type === "draw") current.stroke.points.push(point);
-    if (current.type === "lasso") current.boundary.push(point);
     if (current.type === "erase") eraseBetween(current.last, point, current);
     if (current.type === "transform") {
       const { origin } = current.transform;
@@ -355,19 +426,22 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
   function finishGesture(event: PointerEvent<HTMLElement>, cancel = false) {
     const current = gesture.current;
     if (!current || current.pointerId !== event.pointerId) return;
-    if (!cancel) updateGesture(event);
+    if (current.type === "lasso") {
+      if (!cancel) trackLasso(current, event, true);
+      cancelLassoPaint();
+    } else if (!cancel) updateGesture(event);
     gesture.current = null;
     if (current.type === "transform") setPreview(undefined);
     commitInkGesture(current, page.id, onEdit);
     if (!cancel) {
-      if (current.type === "lasso" && current.boundary.length >= 3) {
+      if (current.type === "lasso" && current.dragged && current.boundary.length >= 3) {
         setSelectedIds([
           ...page.strokes.filter((stroke) => caughtByLasso(stroke, current.boundary)).map((stroke) => stroke.id),
           ...page.textBoxes.filter((box) => caughtPolygonByLasso(textBoxCorners(box), current.boundary)).map((box) => box.id),
         ]);
-      } else if (current.type === "lasso" && current.boundary.length === 1) {
-        const hit = page.textBoxes.findLast((box) => hitsTextBox(box, current.last)) ??
-          page.strokes.findLast((stroke) => hitsStroke(stroke, current.last, current.last, 12));
+      } else if (current.type === "lasso" && !current.dragged) {
+        const point = current.boundary[0];
+        const hit = page.textBoxes.findLast((box) => hitsTextBox(box, point)) ?? closestStrokeAt(page.strokes, point, lassoHitRadius(event));
         if (hit) setSelectedIds([hit.id]);
       }
       if (current.type === "transform") applySelectionTransform(current.ids, current.transform);
@@ -405,7 +479,7 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
 
   return <>
     {tool.type === "lasso" && <div className="lasso-bar">
-      <span aria-live="polite">{selected.size ? `${selected.size} selected · Drag handles to resize or rotate` : "Draw around strokes or text boxes to select them."}</span>
+      <span aria-live="polite">{selected.size ? `${selected.size} selected · Drag handles to resize or rotate` : "Trace a loop around strokes or text boxes. Tap to select one."}</span>
       {selected.size > 0 && <button type="button" className="editor-tool" aria-label="Copy selection" title="Copy selection" onClick={copySelection}><Copy size={18} /></button>}
       {clipboard && <button type="button" className="editor-tool" aria-label="Paste selection" title="Paste selection" onClick={pasteSelection}><ClipboardPaste size={18} /></button>}
       {selected.size > 0 && <button type="button" className="editor-tool" aria-label="Delete selected objects" title="Delete selected objects" onClick={deleteSelection}><Trash2 size={18} /></button>}
