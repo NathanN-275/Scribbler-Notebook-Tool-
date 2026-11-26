@@ -41,17 +41,20 @@ The demo returns sample replies without using the live allowance. It receives th
 
 1. In AWS Settings, confirm the selected Region and check your credits in **Billing**. Verify in-Region support for **Amazon Nova Lite** (`amazon.nova-lite-v1:0`) and try a sample prompt in Bedrock Playground.
 2. In Vercel, enable **Vercel Authentication** for previews and verify access in a signed-out browser. Leave preview bypasses off. Enable OIDC federation with the Team issuer.
-3. Follow [Vercel's AWS OIDC guide](https://vercel.com/docs/oidc/aws) to create the IAM provider and role. Use the exact trust subject `owner:<TEAM>:project:<PROJECT>:environment:preview` and the audience `https://vercel.com/<TEAM>`. Grant only `bedrock:InvokeModelWithResponseStream` on `arn:aws:bedrock:<REGION>::foundation-model/amazon.nova-lite-v1:0` in the selected Region.
-4. In **Settings → Environment Variables**, turn on [automatic exposure of system environment variables](https://vercel.com/docs/environment-variables/system-environment-variables). Add these variables to the **Preview** environment for the tutor branch only:
+3. Publish a numbered Bedrock Guardrail version in the selected Region. Start with Medium blocking for harmful text in questions and replies and for harmful images in note pages. Set prompt attack blocking to High on text and image inputs. Anonymize email addresses, phone numbers, US Social Security numbers, and credit card numbers in text. Use “The tutor couldn’t respond safely. Try rephrasing your question or removing sensitive content.” as the blocked message for inputs and outputs. Image filters have limited coverage for text within images, so use throwaway notes for preview checks. [AWS image filters](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-mmfilter.html)
+4. Follow [Vercel's AWS OIDC guide](https://vercel.com/docs/oidc/aws) to configure the IAM provider and role. Use the exact trust subject `owner:<TEAM>:project:<PROJECT>:environment:preview` and the audience `https://vercel.com/<TEAM>`. Scope `bedrock:InvokeModelWithResponseStream` to `arn:aws:bedrock:<REGION>::foundation-model/amazon.nova-lite-v1:0` and `bedrock:ApplyGuardrail` to the selected Guardrail ARN. Require the exact numbered version with the IAM `bedrock:GuardrailIdentifier` condition and explicitly deny inference if it is missing or different. [AWS IAM policy example](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-permissions-id.html)
+5. In **Settings → Environment Variables**, turn on [automatic exposure of system environment variables](https://vercel.com/docs/environment-variables/system-environment-variables). Add these variables to the **Preview** environment for the tutor branch only:
 
    ```text
    AWS_REGION=<selected AWS project Region>
    AWS_ROLE_ARN=<preview OIDC role ARN>
+   AWS_BEDROCK_GUARDRAIL_ID=<guardrail ID or ARN>
+   AWS_BEDROCK_GUARDRAIL_VERSION=<numbered version>
    NEXT_PUBLIC_AI_TUTOR_MODE=live
    AI_TUTOR_ENABLED=true
    ```
 
-5. Redeploy and confirm a signed-out request to `/api/ai-tutor` cannot reach the route. Sign in and test with a throwaway note containing handwriting. Confirm first-send consent, streamed replies and a follow-up. Check AWS Billing after the smoke test.
+6. Redeploy and confirm that signed-out requests cannot invoke the tutor. Sign in with a throwaway note and verify consent, streamed replies, and a follow-up. Check that benign study material works, that the Guardrail blocks flagged text and images, and that synthetic PII is masked in text. Check AWS Settings → Billing after the smoke test.
 
 OIDC gives the function temporary credentials. Live mode requires Vercel's `VERCEL_ENV=preview` and the server enable flag. Public production and local development use the demo. Keep Bedrock model invocation logging off for note content. To pause the preview, disable the live flags and redeploy. Revoke the role's Bedrock permission to stop older previews immediately.
 
