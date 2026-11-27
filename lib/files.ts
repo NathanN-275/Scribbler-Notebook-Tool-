@@ -79,7 +79,7 @@ function drawPaper(ctx: CanvasRenderingContext2D, paper: PaperType, spacing: num
   }
 }
 
-export async function renderPageBlob(note: Note, page: Page, resolution = 2) {
+export async function renderPageBlob(note: Pick<Note, "paper" | "paperSpacing">, page: Page, resolution = 2) {
   const canvas = document.createElement("canvas");
   canvas.width = Math.ceil(pageWidth * resolution);
   canvas.height = Math.ceil(pageHeight * resolution);

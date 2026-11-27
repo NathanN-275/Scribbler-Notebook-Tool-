@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { BookOpen, Bookmark, BookMarked, Check, ChevronLeft, ChevronRight, Copy, Download, Eraser, FileText, Hand, Keyboard, Lasso, Pencil, PenTool, Plus, Redo2, Settings, Shapes, Sparkles, Trash2, Type, Undo2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
+import { BookOpen, Bookmark, BookMarked, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Copy, Download, Eraser, FileText, Hand, Keyboard, Lasso, Pencil, PenTool, Plus, Redo2, Settings, Shapes, Sparkles, Trash2, Type, Undo2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
 import { defaultEditorSettings, newPage, nextUntitledNoteName, readEditorSettings, readLibrary, readNote, saveEditorSettings, saveNote, storageFailureMessage, type EditorSettings, type Note, type Page, type StudyItem } from "../lib/notebooks";
 import { downloadBlob, makePdf, prepareFilePages, renderPageBlob } from "../lib/files";
+import { bedrockAIProvider, mockAIProvider, type AIAttachment } from "../lib/ai-tutor";
+import { AITutorPanel } from "./ai-tutor-panel";
 import { InkCanvas, type DrawingTool } from "./ink-canvas";
 import type { PageItems } from "../lib/selection";
 import { InkPalette } from "./ink-palette";
@@ -43,6 +45,7 @@ type Tool = (typeof tools)[number]["id"];
 type ToolShortcuts = Record<Tool, string>;
 const defaultToolShortcuts: ToolShortcuts = { pen: "q", pencil: "w", shape: "u", eraser: "e", text: "r", pan: "t", lasso: "y" };
 const toolShortcutsStorageKey = "scribbler-tool-shortcuts:v1";
+const aiTutorProvider = process.env.NEXT_PUBLIC_AI_TUTOR_MODE === "live" ? bedrockAIProvider : mockAIProvider;
 type SizedTool = "pen" | "pencil" | "shape" | "eraser";
 type PaperSettings = Pick<Note, "paper" | "paperSpacing">;
 type PageSnapshot = Pick<Page, "strokes" | "textBoxes">;
@@ -88,6 +91,7 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "error">("saved");
   const [saveErrorMessage, setSaveErrorMessage] = useState("");
   const [pageIndex, setPageIndex] = useState(0);
+  const [thumbnailStripOpen, setThumbnailStripOpen] = useState<boolean>();
   const [clipboard, setClipboard] = useState<PageItems>();
   const [tool, setTool] = useState<Tool>("pen");
   const [inkColors, setInkColors] = useState({ pen: colors[0].value, pencil: colors[0].value });
@@ -96,6 +100,7 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   const [settingsErrorMessage, setSettingsErrorMessage] = useState("");
   const [widthSlider, setWidthSlider] = useState<{ tool: SizedTool; preset: number }>();
   const [aiOpen, setAiOpen] = useState(false);
+  const [aiSelection, setAiSelection] = useState<AIAttachment>();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [toolShortcuts, setToolShortcuts] = useState<ToolShortcuts>(defaultToolShortcuts);
   const [shortcutsLoaded, setShortcutsLoaded] = useState(false);
@@ -124,6 +129,8 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   const histories = useRef(new Map<string, History>());
   const latestSave = useRef(0);
   const noteRef = useRef<Note | null | undefined>(undefined);
+  const aiToggle = useRef<HTMLButtonElement>(null);
+  const aiTrigger = useRef<HTMLButtonElement>(null);
   const eraserDialog = useRef<HTMLDialogElement>(null);
   const paperDialog = useRef<HTMLDialogElement>(null);
   const uploadInput = useRef<HTMLInputElement>(null);
@@ -340,6 +347,18 @@ export function NoteEditor({ noteId }: { noteId: string }) {
     setStudyItemOpen(true);
   }
 
+  function openTutor(trigger: HTMLButtonElement, selection?: AIAttachment) {
+    aiTrigger.current = trigger;
+    setAiSelection(selection);
+    setAiOpen(true);
+  }
+
+  function closeTutor() {
+    setAiOpen(false);
+    const trigger = aiTrigger.current;
+    (trigger?.isConnected ? trigger : aiToggle.current)?.focus();
+  }
+
   async function submitStudyItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!note || !page) return;
@@ -395,6 +414,7 @@ export function NoteEditor({ noteId }: { noteId: string }) {
     if (index < 0) return;
     const [removed] = current.pages.slice(index, index + 1);
     const pages = current.pages.filter((item) => item.id !== pageToDelete);
+    setAiSelection((selection) => selection?.pageId === removed.id ? undefined : selection);
     window.clearTimeout(undoPageTimer.current);
     setDeletedPage({ page: removed, index });
     undoPageTimer.current = window.setTimeout(() => setDeletedPage(undefined), 8000);
@@ -547,6 +567,7 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   }
 
   const selectedForExport = note.pages.filter((item) => exportSelection.includes(item.id));
+  const showPageThumbnails = thumbnailStripOpen ?? (note.pages.length > 1);
   return <div className="editor">
     <header className="editor-topbar">
       <Link href="/library" className="editor-back" aria-label="Library"><BookOpen size={18} /><span>Library</span></Link>
@@ -561,7 +582,8 @@ export function NoteEditor({ noteId }: { noteId: string }) {
         <button type="button" className="file-action shortcut-help-button" aria-label="Keyboard shortcuts" aria-haspopup="dialog" onClick={() => setShortcutsOpen(true)} data-tooltip="Keyboard shortcuts"><Keyboard size={17} /><span>Shortcuts</span></button>
         <input ref={uploadInput} hidden type="file" multiple accept=".pdf,.docx,.png,.jpg,.jpeg,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg"
           onChange={(event) => { void uploadFiles(event.currentTarget.files); event.currentTarget.value = ""; }} />
-        <button type="button" className="assistant-toggle" aria-label="AI tutor" aria-expanded={aiOpen} aria-controls={aiOpen ? "ai-panel" : undefined} onClick={() => setAiOpen(!aiOpen)}><Sparkles size={17} /><span>AI tutor</span></button>
+        <button ref={aiToggle} type="button" className="assistant-toggle" aria-label="AI tutor" aria-expanded={aiOpen} aria-controls="ai-panel"
+          onClick={(event) => aiOpen ? setAiOpen(false) : openTutor(event.currentTarget)}><Sparkles size={17} /><span>AI tutor</span></button>
       </div>
     </header>
     <div className="editor-toolbar" role="group" aria-label="Drawing tools">
@@ -621,9 +643,10 @@ export function NoteEditor({ noteId }: { noteId: string }) {
     <div className="editor-body">
       <main className="editor-workspace">
         <InkCanvas key={page.id} page={page} pageNumber={pageIndex + 1} paper={note.paper} paperSpacing={note.paperSpacing}
-          tool={drawingTool} zoom={zoom} clipboard={clipboard} toolShortcuts={toolShortcuts} onCopy={setClipboard} onEdit={editPage} onZoomChange={setZoom} />
-        <nav className="page-thumbnails" aria-label="Page thumbnails">
-          <div className="page-thumbnail-strip">
+          tool={drawingTool} zoom={zoom} clipboard={clipboard} toolShortcuts={toolShortcuts} onCopy={setClipboard} onEdit={editPage} onZoomChange={setZoom}
+          onAskAI={(items, trigger) => openTutor(trigger, { pageId: page.id, items })} />
+        <nav id="page-thumbnails" className="page-thumbnails" aria-label="Page thumbnails" hidden={!showPageThumbnails}>
+          {showPageThumbnails && <div className="page-thumbnail-strip">
             {note.pages.map((item, index) => <div className="page-thumbnail-card" key={item.id}
               draggable
               onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", item.id); setDraggedPageId(item.id); }}
@@ -641,12 +664,17 @@ export function NoteEditor({ noteId }: { noteId: string }) {
                 <button type="button" aria-label={`Move page ${index + 1} later`} title="Move later" disabled={index === note.pages.length - 1} onClick={() => reorderPages(item.id, note.pages[index + 1].id)}><ChevronRight size={14} /></button>
               </div>
             </div>)}
-          </div>
+          </div>}
         </nav>
         {deletedPage && <div className="page-undo" role="status" aria-live="polite">
           <span>Page {deletedPage.index + 1} deleted.</span><button type="button" onClick={undoPageDelete}>Undo</button>
         </div>}
         <nav className="editor-pagination" aria-label="Note pages">
+          <button type="button" className="page-action" aria-expanded={showPageThumbnails} aria-controls="page-thumbnails"
+            onClick={() => setThumbnailStripOpen(!showPageThumbnails)}>
+            {showPageThumbnails ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronUp size={16} aria-hidden="true" />}
+            {showPageThumbnails ? "Hide thumbnails" : "Show thumbnails"}
+          </button>
           <ToolButton label="Previous page" disabled={pageIndex === 0} onClick={() => setPageIndex(pageIndex - 1)}><ChevronLeft size={20} /></ToolButton>
           <span aria-live="polite">Page {pageIndex + 1} of {note.pages.length}</span>
           <ToolButton label="Next page" disabled={pageIndex + 1 === note.pages.length} onClick={() => setPageIndex(pageIndex + 1)}><ChevronRight size={20} /></ToolButton>
@@ -656,12 +684,8 @@ export function NoteEditor({ noteId }: { noteId: string }) {
           <button type="button" className="add-page" onClick={addPage}><Plus size={18} /> Add page</button>
         </nav>
       </main>
-      {aiOpen && <aside className="ai-panel" id="ai-panel" aria-labelledby="ai-title">
-        <div className="ai-panel-title"><Sparkles size={19} /><h2 id="ai-title">AI tutor</h2>
-          <ToolButton label="Close AI tutor" onClick={() => setAiOpen(false)}><X size={19} /></ToolButton>
-        </div>
-        <div className="ai-empty"><strong>Coming later</strong><p>The tutor will help you work through handwritten problems, get hints, and practice.</p></div>
-      </aside>}
+      <AITutorPanel open={aiOpen} note={note} pageId={page.id} selection={aiSelection} provider={aiTutorProvider}
+        onRemoveSelection={() => setAiSelection(undefined)} onClose={closeTutor} />
     </div>
     <dialog ref={paperDialog} className="create-dialog create-note-dialog" aria-labelledby="paper-title">
       <form onSubmit={submitPaper}>

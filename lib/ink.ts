@@ -29,6 +29,23 @@ export function hitsStroke(stroke: Stroke, from: Point, to: Point, radius: numbe
   return stroke.points.some((point, index) => touches(stroke.points[index - 1] ?? point, point, from, to, radius + stroke.width / 2));
 }
 
+export function closestStrokeAt(strokes: Stroke[], point: Point, radius: number) {
+  let closest: Stroke | undefined;
+  let bestDistance = radius;
+  for (const stroke of strokes) {
+    for (let index = 0; index < stroke.points.length; index++) {
+      const end = stroke.points[index];
+      const start = stroke.points[index - 1] ?? end;
+      const distance = Math.max(0, pointSegmentDistance(point, start, end) - stroke.width / 2);
+      if (distance <= bestDistance) {
+        closest = stroke;
+        bestDistance = distance;
+      }
+    }
+  }
+  return closest;
+}
+
 type Interval = [number, number];
 
 function eraseInterval(start: Point, end: Point, from: Point, to: Point, radius: number): Interval | undefined {

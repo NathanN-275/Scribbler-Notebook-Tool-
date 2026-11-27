@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Archive, BookOpen, Bookmark, ChevronRight, Download, Folder, FolderOpen, FolderPlus, GripVertical, NotebookPen, Pencil, Plus, Search, Sparkles, Tag, Trash2, Upload, X } from "lucide-react";
 import { Brand } from "./brand";
-import { deleteFolderAndUnfileNotes, emptyTrash, moveNoteToTrash, moveNotesToFolder, newPage, nextUntitledNoteName, readEditorSettings, readLibrary, restoreTrashedNote, saveFolder, saveNote, type Library, type Note, type PaperType, type StudyItem } from "../lib/notebooks";
+import { deleteFolderAndUnfileNotes, emptyTrash, moveNotesToTrash, moveNotesToFolder, newPage, nextUntitledNoteName, readEditorSettings, readLibrary, restoreTrashedNote, saveFolder, saveNote, type Library, type Note, type PaperType, type StudyItem } from "../lib/notebooks";
 import { standardPaperSpacing } from "../lib/paper";
 import { PaperControls, PaperPreview, paperStyle } from "./paper-controls";
 import { createLibraryBackup, inspectLibraryBackup, restoreLibraryBackup, type RestoreChoice, type RestorePreview } from "../lib/backup";
@@ -14,8 +14,29 @@ import { downloadBlob } from "../lib/files";
 type CreateMode = "folder" | "note";
 type LibraryViewMode = "all" | "tags" | "study" | "trash";
 type SortMode = "recent" | "name";
-type ManageDialog = { kind: "rename-note" | "rename-folder" | "edit-tags"; id: string } | { kind: "delete-note" | "delete-folder"; id: string } | { kind: "empty-trash" };
+type ManageDialog = { kind: "rename-note" | "rename-folder" | "edit-tags"; id: string } | { kind: "delete-notes"; ids: string[] } | { kind: "delete-folder"; id: string } | { kind: "empty-trash" };
 type ListedStudyItem = { note: Note; item: StudyItem; pageNumber: number | undefined };
+
+function NoteCardTitle({ name }: { name: string }) {
+  const title = useRef<HTMLElement>(null);
+  const [truncated, setTruncated] = useState(false);
+
+  useEffect(() => {
+    const element = title.current;
+    if (!element) return;
+    const measure = () => setTruncated(element.scrollWidth > element.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    void document.fonts.ready.then(measure);
+    return () => observer.disconnect();
+  }, [name]);
+
+  return <div className="note-card-title">
+    <strong ref={title}>{name}</strong>
+    {truncated && <span className="note-title-tooltip" aria-hidden="true">{name}</span>}
+  </div>;
+}
 
 export function LibraryView() {
   const router = useRouter();
@@ -195,7 +216,7 @@ export function LibraryView() {
         if (!note) return;
         const tags = [...new Set(manageName.split(",").map((tag) => tag.trim()).filter(Boolean))];
         await saveNote({ ...note, tags, updatedAt: Date.now() });
-      } else if (manageDialog.kind === "delete-note") await moveNoteToTrash(manageDialog.id);
+      } else if (manageDialog.kind === "delete-notes") await moveNotesToTrash(manageDialog.ids);
       else if (manageDialog.kind === "delete-folder") {
         await deleteFolderAndUnfileNotes(manageDialog.id);
         if (folderId === manageDialog.id) setFolderId(null);
@@ -414,6 +435,8 @@ export function LibraryView() {
                   <option value="" disabled>Choose folder</option><option value="__unfiled">No folder</option>{library.folders.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
                 </select></label>
                 <button type="button" className="button button-outline" onClick={() => setSelectedNotes([])}>Clear selection</button>
+                <button type="button" className="button button-primary danger-button bulk-note-delete"
+                  onClick={() => openManage({ kind: "delete-notes", ids: selectedNotes })}><Trash2 size={16} /> Delete</button>
               </div>}
               {viewMode === "all" && !folder && filteredFolders.length > 0 && (
                 <section className="library-section" aria-labelledby="folders-heading">
@@ -437,13 +460,13 @@ export function LibraryView() {
                     <button type="button" className={note.bookmarked ? "note-bookmark saved" : "note-bookmark"} aria-label={note.bookmarked ? `Remove bookmark from ${note.name}` : `Bookmark ${note.name}`} aria-pressed={!!note.bookmarked} title={note.bookmarked ? "Remove bookmark" : "Bookmark note"} onClick={() => toggleBookmark(note)}><Bookmark size={16} fill={note.bookmarked ? "currentColor" : "none"} /></button>
                     <Link className="note-card-link" href={`/notes/${note.id}`}>
                       <div className="note-cover"><div className={`paper-sample ${note.paper}`} style={paperStyle(note.paperSpacing)}><NotebookPen size={26} /></div></div>
-                      <div className="note-info"><strong>{note.name}</strong><span>{note.paper} · {note.pages.length} {note.pages.length === 1 ? "page" : "pages"}</span>{note.tags?.length ? <span className="note-tag-list">{note.tags.map((tag) => <span className="note-tag" key={tag}>{tag}</span>)}</span> : null}</div>
+                      <div className="note-info"><NoteCardTitle name={note.name} /><span>{note.paper} · {note.pages.length} {note.pages.length === 1 ? "page" : "pages"}</span>{note.tags?.length ? <span className="note-tag-list">{note.tags.map((tag) => <span className="note-tag" key={tag}>{tag}</span>)}</span> : null}</div>
                     </Link>
                     <div className="note-card-actions">
                       <button type="button" className="icon-button" aria-label={`Rename note ${note.name}`} title="Rename" onClick={() => openManage({ kind: "rename-note", id: note.id })}><Pencil size={15} /></button>
                       <button type="button" className="icon-button" aria-label={`Edit study tags for ${note.name}`} title="Study tags" onClick={() => openManage({ kind: "edit-tags", id: note.id })}><Tag size={15} /></button>
-                      <label className="note-move">Move <select aria-label={`Move ${note.name}`} value={note.folderId ?? "__unfiled"} onChange={(event) => void moveNotes([note.id], event.currentTarget.value === "__unfiled" ? null : event.currentTarget.value)}><option value="__unfiled">No folder</option>{library.folders.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
-                      <button type="button" className="icon-button note-delete" aria-label={`Delete note ${note.name}`} title="Move to Trash" onClick={() => openManage({ kind: "delete-note", id: note.id })}><Trash2 size={15} /></button>
+                      <label className="note-move"><select aria-label={`Move ${note.name}`} value={note.folderId ?? "__unfiled"} onChange={(event) => void moveNotes([note.id], event.currentTarget.value === "__unfiled" ? null : event.currentTarget.value)}><option value="__unfiled">No folder</option>{library.folders.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
+                      <button type="button" className="icon-button note-delete" aria-label={`Delete note ${note.name}`} title="Move to Trash" onClick={() => openManage({ kind: "delete-notes", ids: [note.id] })}><Trash2 size={15} /></button>
                     </div>
                   </article>)}
                 </div> : <div className="empty-library">
@@ -503,17 +526,17 @@ export function LibraryView() {
       </dialog>
       <dialog ref={manageDialogRef} className="create-dialog" aria-labelledby="manage-title" onClose={() => { if (!manageBusy) { setManageDialog(undefined); setManageError(""); } }} onCancel={(event) => { if (manageBusy) event.preventDefault(); }}>
         {manageDialog && <form onSubmit={(event) => void submitManage(event)}>
-          <div className="dialog-header"><h2 id="manage-title">{manageDialog.kind === "rename-note" ? "Rename note" : manageDialog.kind === "rename-folder" ? "Rename folder" : manageDialog.kind === "edit-tags" ? "Edit study tags" : manageDialog.kind === "delete-note" ? "Move note to Trash?" : manageDialog.kind === "delete-folder" ? "Delete folder?" : "Empty Trash?"}</h2>
+          <div className="dialog-header"><h2 id="manage-title">{manageDialog.kind === "rename-note" ? "Rename note" : manageDialog.kind === "rename-folder" ? "Rename folder" : manageDialog.kind === "edit-tags" ? "Edit study tags" : manageDialog.kind === "delete-notes" ? `Move ${manageDialog.ids.length} ${manageDialog.ids.length === 1 ? "note" : "notes"} to Trash?` : manageDialog.kind === "delete-folder" ? "Delete folder?" : "Empty Trash?"}</h2>
             <button type="button" className="icon-button" aria-label="Close" disabled={manageBusy} onClick={() => manageDialogRef.current?.close()}><X size={21} /></button></div>
           {(manageDialog.kind === "rename-note" || manageDialog.kind === "rename-folder" || manageDialog.kind === "edit-tags") ? <>
             <label className="field">{manageDialog.kind === "edit-tags" ? "Tags, separated by commas" : "Name"}
               <input name="managed-name" value={manageName} maxLength={manageDialog.kind === "edit-tags" ? 400 : 80} required={manageDialog.kind !== "edit-tags"} onChange={(event) => setManageName(event.currentTarget.value)} />
             </label>
             {manageDialog.kind === "edit-tags" && <div className="tag-suggestion-list"><span>Suggestions</span>{allTags.filter((tag) => !manageName.split(",").map((value) => value.trim()).includes(tag)).map((tag) => <button type="button" key={tag} onClick={() => appendTagSuggestion(tag)}>{tag}</button>)}</div>}
-          </> : <p>{manageDialog.kind === "delete-note" ? "The note and its imported pages will remain in Trash until you empty it." : manageDialog.kind === "delete-folder" ? "Notes in this folder will be moved to All notes. The folder will be removed." : "This permanently removes all notes in Trash, including their imported pages. This cannot be undone."}</p>}
+          </> : <p>{manageDialog.kind === "delete-notes" ? "You can restore these notes and their imported pages from Trash until you empty it." : manageDialog.kind === "delete-folder" ? "Notes in this folder will be moved to All notes. The folder will be removed." : "This permanently removes all notes in Trash, including their imported pages. This cannot be undone."}</p>}
           {manageError && <p className="error-text" role="alert">{manageError}</p>}
           <div className="dialog-actions"><button type="button" className="button button-outline" disabled={manageBusy} onClick={() => manageDialogRef.current?.close()}>Cancel</button>
-            <button className={manageDialog.kind === "delete-note" || manageDialog.kind === "delete-folder" || manageDialog.kind === "empty-trash" ? "button button-primary danger-button" : "button button-primary"} disabled={manageBusy}>{manageBusy ? "Saving…" : manageDialog.kind === "rename-note" || manageDialog.kind === "rename-folder" || manageDialog.kind === "edit-tags" ? "Save" : manageDialog.kind === "delete-note" ? "Move to Trash" : manageDialog.kind === "delete-folder" ? "Delete folder" : "Empty Trash"}</button></div>
+            <button className={manageDialog.kind === "delete-notes" || manageDialog.kind === "delete-folder" || manageDialog.kind === "empty-trash" ? "button button-primary danger-button" : "button button-primary"} disabled={manageBusy}>{manageBusy ? "Saving…" : manageDialog.kind === "rename-note" || manageDialog.kind === "rename-folder" || manageDialog.kind === "edit-tags" ? "Save" : manageDialog.kind === "delete-notes" ? "Move to Trash" : manageDialog.kind === "delete-folder" ? "Delete folder" : "Empty Trash"}</button></div>
         </form>}
       </dialog>
       <dialog ref={reviewDialogRef} className="create-dialog review-dialog" aria-labelledby="review-title" onClose={() => setReviewOpen(false)}>
