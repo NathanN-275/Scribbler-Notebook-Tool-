@@ -13,7 +13,7 @@ function SwatchButton({ swatch, selected, onClick }: { swatch: Swatch; selected:
 }
 
 export function InkPalette({ tool, swatches, selected, onSelect, onSave, onRemove }: {
-  tool: "pen" | "pencil";
+  tool: "pen" | "pencil" | "shape";
   swatches: Swatch[];
   selected: string;
   onSelect: (color: string) => void;

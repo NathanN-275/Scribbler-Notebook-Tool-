@@ -6,9 +6,11 @@ import type { EraserMode, Page, PaperType, Point, Stroke, TextBox } from "../lib
 import { caughtByLasso, caughtPolygonByLasso, closestStrokeAt, drawStroke, eraseStrokePoints, hitsStroke, pageHeight, pageWidth } from "../lib/ink";
 import { boxCenter, hitsTextBox, selectionBounds, selectionTransform, textBoxCorners, transformBox, transformStroke, transformTextBox, type Bounds, type PageItems, type SelectionTransform } from "../lib/selection";
 import { paperStyle } from "./paper-controls";
+import { shapePoints, type ShapeKind } from "../lib/shapes";
 
 export type DrawingTool =
   | { type: "pen" | "pencil"; color: string; width: number }
+  | { type: "shape"; kind: ShapeKind; color: string; width: number }
   | { type: "eraser"; radius: number; mode: EraserMode }
   | { type: "lasso" | "pan" | "text" };
 
@@ -21,6 +23,7 @@ type TransformGesture = {
 type LassoGesture = { type: "lasso"; boundary: Point[]; dragged: boolean };
 type Gesture = { pointerId: number; last: Point } & (
   | { type: "draw"; stroke: Stroke }
+  | { type: "shape"; kind: ShapeKind; start: Point; stroke: Stroke }
   | EraseGesture
   | LassoGesture
   | TransformGesture
@@ -90,7 +93,7 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
   tool: DrawingTool;
   zoom: number;
   clipboard?: PageItems;
-  toolShortcuts: Record<"pen" | "pencil" | "eraser" | "text" | "pan" | "lasso", string>;
+  toolShortcuts: Record<"pen" | "pencil" | "shape" | "eraser" | "text" | "pan" | "lasso", string>;
   onCopy: (items: PageItems) => void;
   onEdit: EditPage;
   onZoomChange: (zoom: number) => void;
@@ -105,6 +108,7 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
   const [preview, setPreview] = useState<SelectionTransform>();
   const [focusedBoxId, setFocusedBoxId] = useState<string>();
   const selectable = tool.type === "lasso" || tool.type === "pan";
+  const activeShape = tool.type === "shape" ? tool.kind : undefined;
   const selection = useMemo(() => {
     const ids = new Set(selectable ? selectedIds : []);
     return {
@@ -213,10 +217,26 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
       drawStroke(ctx, displayed, selected.has(stroke.id));
     }
     if (current?.type === "draw") drawStroke(ctx, current.stroke, false);
+    if (current?.type === "shape") drawStroke(ctx, current.stroke, false);
     if (current?.type === "lasso") {
       drawLassoBoundary(ctx, current.boundary, pageWidth / Math.max(1, element.getBoundingClientRect().width));
     }
   }, [page, selected]);
+
+  useEffect(() => {
+    if (gesture.current?.type === "shape") { gesture.current = null; paint(); }
+  }, [tool.type, activeShape, paint]);
+
+  useEffect(() => {
+    function cancelShape(event: KeyboardEvent) {
+      if (event.key !== "Escape" || gesture.current?.type !== "shape") return;
+      event.preventDefault();
+      gesture.current = null;
+      paint();
+    }
+    window.addEventListener("keydown", cancelShape);
+    return () => window.removeEventListener("keydown", cancelShape);
+  }, [paint]);
 
   useLayoutEffect(() => {
     const element = canvas.current;
@@ -372,6 +392,9 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
     event.currentTarget.setPointerCapture(event.pointerId);
     if (tool.type === "pen" || tool.type === "pencil") {
       gesture.current = { ...base, type: "draw", stroke: { id: crypto.randomUUID(), tool: tool.type, color: tool.color, width: tool.width, points: [point] } };
+    } else if (tool.type === "shape") {
+      gesture.current = { ...base, type: "shape", kind: tool.kind, start: point,
+        stroke: { id: crypto.randomUUID(), tool: "pen", color: tool.color, width: tool.width, points: [] } };
     } else if (tool.type === "eraser") {
       const eraser = { ...base, type: "erase" as const, radius: tool.radius, mode: tool.mode, edits: new Map<string, Stroke[]>() };
       eraseBetween(point, point, eraser);
@@ -404,6 +427,7 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
     }
     if (point.x === current.last.x && point.y === current.last.y) return;
     if (current.type === "draw") current.stroke.points.push(point);
+    if (current.type === "shape") current.stroke.points = shapePoints(current.kind, current.start, point);
     if (current.type === "erase") eraseBetween(current.last, point, current);
     if (current.type === "transform") {
       const { origin } = current.transform;
@@ -434,6 +458,9 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
     if (current.type === "transform") setPreview(undefined);
     commitInkGesture(current, page.id, onEdit);
     if (!cancel) {
+      if (current.type === "shape" && current.stroke.points.length) {
+        onEdit(page.id, (currentPage) => ({ ...currentPage, strokes: [...currentPage.strokes, current.stroke] }));
+      }
       if (current.type === "lasso" && current.dragged && current.boundary.length >= 3) {
         setSelectedIds([
           ...page.strokes.filter((stroke) => caughtByLasso(stroke, current.boundary)).map((stroke) => stroke.id),
@@ -492,7 +519,7 @@ export function InkCanvas({ page, pageNumber, paper, paperSpacing, tool, zoom, c
       <div className="paper-zoom" style={{ "--zoom": zoom } as CSSProperties}>
         <div className={`editor-paper ${paper}`} style={paperStyle(paperSpacing)}>
           {backgroundUrl && <img className="page-background" src={backgroundUrl} alt="Imported page background" />}
-          <canvas ref={canvas} className={`ink-canvas tool-${tool.type}`} role="application" tabIndex={0} aria-label={`Drawing surface, page ${pageNumber}. Press ${toolShortcuts.pen.toUpperCase()} for pen, ${toolShortcuts.pencil.toUpperCase()} for pencil, ${toolShortcuts.eraser.toUpperCase()} for eraser, ${toolShortcuts.text.toUpperCase()} for text, ${toolShortcuts.pan.toUpperCase()} for pan, or ${toolShortcuts.lasso.toUpperCase()} for lasso.`}
+          <canvas ref={canvas} className={`ink-canvas tool-${tool.type}`} role="application" tabIndex={0} aria-label={`Drawing surface, page ${pageNumber}. Press ${toolShortcuts.pen.toUpperCase()} for pen, ${toolShortcuts.pencil.toUpperCase()} for pencil, ${toolShortcuts.shape.toUpperCase()} for shapes, ${toolShortcuts.eraser.toUpperCase()} for eraser, ${toolShortcuts.text.toUpperCase()} for text, ${toolShortcuts.pan.toUpperCase()} for pan, or ${toolShortcuts.lasso.toUpperCase()} for lasso.`}
             onPointerDown={startGesture} onPointerMove={updateGesture} onPointerUp={(event) => finishGesture(event)}
             onPointerCancel={(event) => finishGesture(event, true)} onLostPointerCapture={(event) => finishGesture(event, true)} />
           <div className={`text-layer ${tool.type === "text" ? "text-editing" : ""}`}>

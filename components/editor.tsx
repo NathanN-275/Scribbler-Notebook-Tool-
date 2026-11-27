@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { BookOpen, Bookmark, BookMarked, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Copy, Download, Eraser, FileText, Hand, Keyboard, Lasso, Pencil, PenTool, Plus, Redo2, Settings, Sparkles, Trash2, Type, Undo2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
+import { BookOpen, Bookmark, BookMarked, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Copy, Download, Eraser, FileText, Hand, Keyboard, Lasso, Pencil, PenTool, Plus, Redo2, Settings, Shapes, Sparkles, Trash2, Type, Undo2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
 import { defaultEditorSettings, newPage, nextUntitledNoteName, readEditorSettings, readLibrary, readNote, saveEditorSettings, saveNote, storageFailureMessage, type EditorSettings, type Note, type Page, type StudyItem } from "../lib/notebooks";
 import { downloadBlob, makePdf, prepareFilePages, renderPageBlob } from "../lib/files";
 import { bedrockAIProvider, mockAIProvider, type AIAttachment } from "../lib/ai-tutor";
@@ -11,11 +11,13 @@ import { InkCanvas, type DrawingTool } from "./ink-canvas";
 import type { PageItems } from "../lib/selection";
 import { InkPalette } from "./ink-palette";
 import { PaperControls, PaperPreview } from "./paper-controls";
+import type { ShapeKind } from "../lib/shapes";
 
 const tools = [
   { id: "pan", label: "Pan", Icon: Hand },
   { id: "pen", label: "Pen", Icon: PenTool },
   { id: "pencil", label: "Pencil", Icon: Pencil },
+  { id: "shape", label: "Shapes", Icon: Shapes },
   { id: "text", label: "Text", Icon: Type },
   { id: "eraser", label: "Eraser", Icon: Eraser },
   { id: "lasso", label: "Lasso", Icon: Lasso },
@@ -41,10 +43,10 @@ function availableSwatches(settings: EditorSettings) {
 
 type Tool = (typeof tools)[number]["id"];
 type ToolShortcuts = Record<Tool, string>;
-const defaultToolShortcuts: ToolShortcuts = { pen: "q", pencil: "w", eraser: "e", text: "r", pan: "t", lasso: "y" };
+const defaultToolShortcuts: ToolShortcuts = { pen: "q", pencil: "w", shape: "u", eraser: "e", text: "r", pan: "t", lasso: "y" };
 const toolShortcutsStorageKey = "scribbler-tool-shortcuts:v1";
 const aiTutorProvider = process.env.NEXT_PUBLIC_AI_TUTOR_MODE === "live" ? bedrockAIProvider : mockAIProvider;
-type SizedTool = "pen" | "pencil" | "eraser";
+type SizedTool = "pen" | "pencil" | "shape" | "eraser";
 type PaperSettings = Pick<Note, "paper" | "paperSpacing">;
 type PageSnapshot = Pick<Page, "strokes" | "textBoxes">;
 type History = { undo: PageSnapshot[]; redo: PageSnapshot[] };
@@ -82,6 +84,7 @@ function dateText(timestamp: number) {
 }
 
 export function NoteEditor({ noteId }: { noteId: string }) {
+  const [shapeKind, setShapeKind] = useState<ShapeKind>("line");
   const [note, setNote] = useState<Note | null>();
   const [loadError, setLoadError] = useState(false);
   const [loadRequest, setLoadRequest] = useState(0);
@@ -141,7 +144,8 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   const page: Page | undefined = note?.pages[pageIndex];
   noteRef.current = note;
   const history = page && histories.current.get(page.id);
-  const sizedTool = tool === "pen" || tool === "pencil" || tool === "eraser" ? tool : null;
+  const colorTool = tool === "shape" ? "pen" : tool;
+  const sizedTool: SizedTool | null = tool === "shape" ? "shape" : tool === "pen" || tool === "pencil" || tool === "eraser" ? tool : null;
   const sizeKey = tool === "eraser" ? "eraserRadius" : tool === "pencil" ? "pencilWidth" : "penWidth";
   const size = settings[sizeKey];
   const presets = tool === "eraser" ? eraserRadii : sizeWidths;
@@ -150,6 +154,7 @@ export function NoteEditor({ noteId }: { noteId: string }) {
     presets.reduce((closest, preset) => Math.abs(preset - size) < Math.abs(closest - size) ? preset : closest);
   const drawingTool: DrawingTool = tool === "pen" || tool === "pencil"
     ? { type: tool, color: inkColors[tool], width: size }
+    : tool === "shape" ? { type: tool, kind: shapeKind, color: inkColors.pen, width: size }
     : tool === "eraser" ? { type: tool, radius: size, mode: settings.eraserMode }
       : { type: tool };
 
@@ -592,7 +597,12 @@ export function NoteEditor({ noteId }: { noteId: string }) {
           setWidthSlider(undefined);
         }}><Icon size={20} /></ToolButton>)}
       </div>
-      {(tool === "pen" || tool === "pencil") && <InkPalette tool={tool} swatches={availableSwatches(settings)} selected={inkColors[tool]}
+      {tool === "shape" && <label className="shape-picker">Shape
+        <select aria-label="Shape type" value={shapeKind} onChange={(event) => setShapeKind(event.target.value as ShapeKind)}>
+          <option value="line">Line</option><option value="rectangle">Rectangle</option><option value="circle">Circle</option>
+        </select><span className="shape-hint">{shapeKind === "circle" ? "Drag from center to edge" : shapeKind === "rectangle" ? "Drag between opposite corners" : "Drag between endpoints"}</span>
+      </label>}
+      {(colorTool === "pen" || colorTool === "pencil") && <InkPalette tool={tool === "shape" ? "shape" : colorTool} swatches={availableSwatches(settings)} selected={inkColors[colorTool]}
         onSelect={selectColor} onSave={addColor} onRemove={removeColors} />}
       {sizedTool && <div className="tool-group size-buttons" role="group" aria-label={`${sizedTool} sizes`}>
         {presets.map((preset, index) => <ToolButton key={preset} label={`${sizeLabels[index]} ${sizedTool}`} active={activePreset === preset} onClick={() => {
