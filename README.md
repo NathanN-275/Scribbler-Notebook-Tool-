@@ -4,13 +4,7 @@
 
 ![Scribbler homepage with a preview of handwritten calculus notes on graph paper](docs/images/scribbler-home.png)
 
-Scribbler is a browser notebook for handwritten notes and study. Create a folder or note from the library, choose a paper type and spacing, and open the editor. Notes save automatically in the current browser. The editor supports ink, text boxes, local page imports, and PDF export. The AI tutor panel previews a future AWS integration.
-
-## Draw shapes
-
-Choose Shapes in the editor, then Line, Rectangle, or Circle. Drag between endpoints for a line, between opposite corners for a rectangle, or from the center outward for a circle. Shapes use the pen's color and width. Release to save the outline, or press Escape to cancel the preview.
-
-Completed shapes behave like ink: use the lasso to move, resize, rotate, copy, or delete them, and either eraser to remove all or part of an outline. Each shape takes one Undo step, saves with the note, and appears in PDF exports.
+Scribbler is a browser notebook for handwritten notes and study. Create and organize folders and notes from the library, search and sort notes, and move them with drag-and-drop or bulk actions. Add note tags and bookmarks, then make page-linked flashcards or short-answer practice questions for manual review. Notes save automatically in the current browser; deleted notes remain recoverable in Trash until you empty it. The editor supports ink, line, rectangle, and circle drawing, text boxes, page thumbnails, page reordering, duplication and deletion with undo, local page imports, PDF export, keyboard shortcuts, and two-finger pan and zoom. Tool keys default to Q/W/U/E/R/T/Y and can be changed in the in-editor shortcut guide; these preferences stay in this browser. Save failures explain when browser storage is full or unavailable. The library can export and restore a full Scribbler backup, including Trash and study material. AI drafting remains a placeholder for a later update.
 
 ## Run locally
 
@@ -29,7 +23,7 @@ Open [localhost:3000](http://localhost:3000). Use `npm run build` to create a pr
 - `components/editor.tsx` coordinates pages, tool settings, import/export, and save feedback. `components/ink-canvas.tsx` handles drawing, text boxes, selection, and page panning.
 - `lib/ink.ts` holds drawing and hit detection. `lib/files.ts` renders local imports and PDFs. `lib/notebooks.ts` owns the notebook model and IndexedDB transactions.
 
-Select the active Eraser again to choose between removing a whole stroke and erasing only the part you touch. Undo and redo apply to page edits on the current page and reset when the editor closes. Imported page images and tool settings are local to this browser profile and site address; they do not sync to other devices.
+Select the active Eraser again to choose between removing a whole stroke and erasing only the part you touch. Undo and redo apply to page edits on the current page and reset when the editor closes. Imported page images and tool settings are local to this browser profile and site address; they do not sync to other devices. Use **Back up** in the library to save a portable `.scribbler` archive, and **Restore** to merge one into the current library.
 
 ## Vercel
 

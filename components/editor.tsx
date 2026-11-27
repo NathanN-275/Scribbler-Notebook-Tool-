@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { BookOpen, Check, ChevronLeft, ChevronRight, Download, Eraser, FileText, Hand, Lasso, Pencil, PenTool, Plus, Redo2, Settings, Shapes, Sparkles, Type, Undo2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
-import { defaultEditorSettings, newPage, nextUntitledNoteName, readEditorSettings, readLibrary, readNote, saveEditorSettings, saveNote, type EditorSettings, type Note, type Page } from "../lib/notebooks";
+import { BookOpen, Bookmark, BookMarked, Check, ChevronLeft, ChevronRight, Copy, Download, Eraser, FileText, Hand, Keyboard, Lasso, Pencil, PenTool, Plus, Redo2, Settings, Shapes, Sparkles, Trash2, Type, Undo2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
+import { defaultEditorSettings, newPage, nextUntitledNoteName, readEditorSettings, readLibrary, readNote, saveEditorSettings, saveNote, storageFailureMessage, type EditorSettings, type Note, type Page, type StudyItem } from "../lib/notebooks";
 import { downloadBlob, makePdf, prepareFilePages, renderPageBlob } from "../lib/files";
 import { InkCanvas, type DrawingTool } from "./ink-canvas";
 import type { PageItems } from "../lib/selection";
@@ -40,7 +40,10 @@ function availableSwatches(settings: EditorSettings) {
 }
 
 type Tool = (typeof tools)[number]["id"];
-type SizedTool = "pen" | "pencil" | "eraser";
+type ToolShortcuts = Record<Tool, string>;
+const defaultToolShortcuts: ToolShortcuts = { pen: "q", pencil: "w", shape: "u", eraser: "e", text: "r", pan: "t", lasso: "y" };
+const toolShortcutsStorageKey = "scribbler-tool-shortcuts:v1";
+type SizedTool = "pen" | "pencil" | "shape" | "eraser";
 type PaperSettings = Pick<Note, "paper" | "paperSpacing">;
 type PageSnapshot = Pick<Page, "strokes" | "textBoxes">;
 type History = { undo: PageSnapshot[]; redo: PageSnapshot[] };
@@ -63,13 +66,13 @@ function BlobPreview({ blob, label }: { blob: Blob; label: string }) {
   return url ? <img src={url} alt={label} /> : <span className="page-thumbnail-loading" />;
 }
 
-function NotePagePreview({ note, page, label }: { note: Note; page: Page; label: string }) {
+function NotePagePreview({ note, page, label, resolution = 2 }: { note: Note; page: Page; label: string; resolution?: number }) {
   const [blob, setBlob] = useState<Blob>();
   useEffect(() => {
     let active = true;
-    renderPageBlob(note, page).then((rendered) => { if (active) setBlob(rendered); }).catch(() => undefined);
+    renderPageBlob(note, page, resolution).then((rendered) => { if (active) setBlob(rendered); }).catch(() => undefined);
     return () => { active = false; };
-  }, [note, page]);
+  }, [note, page, resolution]);
   return blob ? <BlobPreview blob={blob} label={label} /> : <span className="page-thumbnail-loading" />;
 }
 
@@ -83,14 +86,20 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   const [loadError, setLoadError] = useState(false);
   const [loadRequest, setLoadRequest] = useState(0);
   const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "error">("saved");
+  const [saveErrorMessage, setSaveErrorMessage] = useState("");
   const [pageIndex, setPageIndex] = useState(0);
   const [clipboard, setClipboard] = useState<PageItems>();
   const [tool, setTool] = useState<Tool>("pen");
   const [inkColors, setInkColors] = useState({ pen: colors[0].value, pencil: colors[0].value });
   const [settings, setSettings] = useState(defaultEditorSettings);
   const [settingsError, setSettingsError] = useState(false);
+  const [settingsErrorMessage, setSettingsErrorMessage] = useState("");
   const [widthSlider, setWidthSlider] = useState<{ tool: SizedTool; preset: number }>();
   const [aiOpen, setAiOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [toolShortcuts, setToolShortcuts] = useState<ToolShortcuts>(defaultToolShortcuts);
+  const [shortcutsLoaded, setShortcutsLoaded] = useState(false);
+  const [shortcutError, setShortcutError] = useState("");
   const [zoom, setZoom] = useState(1);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState("");
@@ -104,6 +113,14 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   const [exportSelection, setExportSelection] = useState<string[]>([]);
   const [exportBusy, setExportBusy] = useState(false);
   const [fileActionError, setFileActionError] = useState("");
+  const [studyItemOpen, setStudyItemOpen] = useState(false);
+  const [studyItemType, setStudyItemType] = useState<StudyItem["type"]>("flashcard");
+  const [studyPrompt, setStudyPrompt] = useState("");
+  const [studyAnswer, setStudyAnswer] = useState("");
+  const [studyItemError, setStudyItemError] = useState("");
+  const [pageToDelete, setPageToDelete] = useState<string>();
+  const [deletedPage, setDeletedPage] = useState<{ page: Page; index: number }>();
+  const [draggedPageId, setDraggedPageId] = useState<string>();
   const histories = useRef(new Map<string, History>());
   const latestSave = useRef(0);
   const noteRef = useRef<Note | null | undefined>(undefined);
@@ -113,12 +130,15 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   const renameDialog = useRef<HTMLDialogElement>(null);
   const uploadDialog = useRef<HTMLDialogElement>(null);
   const exportDialog = useRef<HTMLDialogElement>(null);
+  const deletePageDialog = useRef<HTMLDialogElement>(null);
+  const studyItemDialog = useRef<HTMLDialogElement>(null);
+  const shortcutsDialog = useRef<HTMLDialogElement>(null);
+  const undoPageTimer = useRef<number | undefined>(undefined);
   const page: Page | undefined = note?.pages[pageIndex];
   noteRef.current = note;
   const history = page && histories.current.get(page.id);
-  // Shapes share the pen's color and width, including its existing saved presets.
   const colorTool = tool === "shape" ? "pen" : tool;
-  const sizedTool = tool === "shape" ? "pen" : tool === "pen" || tool === "pencil" || tool === "eraser" ? tool : null;
+  const sizedTool: SizedTool | null = tool === "shape" ? "shape" : tool === "pen" || tool === "pencil" || tool === "eraser" ? tool : null;
   const sizeKey = tool === "eraser" ? "eraserRadius" : tool === "pencil" ? "pencilWidth" : "penWidth";
   const size = settings[sizeKey];
   const presets = tool === "eraser" ? eraserRadii : sizeWidths;
@@ -133,15 +153,65 @@ export function NoteEditor({ noteId }: { noteId: string }) {
 
   useEffect(() => {
     let active = true;
-    readNote(noteId).then((stored) => { if (active) setNote(stored ?? null); }, () => { if (active) setLoadError(true); });
+    readNote(noteId).then((stored) => {
+      if (!active) return;
+      setNote(stored ?? null);
+      const pageId = new URLSearchParams(window.location.search).get("page");
+      const linkedPageIndex = stored?.pages.findIndex((item) => item.id === pageId) ?? -1;
+      setPageIndex(linkedPageIndex >= 0 ? linkedPageIndex : 0);
+    }, () => { if (active) setLoadError(true); });
     readEditorSettings().then((stored) => {
       if (!active) return;
       setSettings(stored);
       const fallback = availableSwatches(stored)[0]?.value ?? colors[0].value;
       setInkColors({ pen: fallback, pencil: fallback });
-    }, () => { if (active) setSettingsError(true); });
+    }, (error) => {
+      if (!active) return;
+      setSettingsError(true);
+      setSettingsErrorMessage(storageFailureMessage(error, "load your editor settings"));
+    });
     return () => { active = false; };
   }, [noteId, loadRequest]);
+
+  useEffect(() => {
+    let candidate = { ...defaultToolShortcuts };
+    try {
+      const stored = window.localStorage.getItem(toolShortcutsStorageKey);
+      if (stored) {
+        const parsed = JSON.parse(stored) as Partial<ToolShortcuts>;
+        for (const { id } of tools) {
+          const value = parsed[id];
+          if (typeof value === "string" && /^[a-z0-9]$/i.test(value)) candidate[id] = value.toLowerCase();
+        }
+        if (new Set(Object.values(candidate)).size !== tools.length) candidate = { ...defaultToolShortcuts };
+      }
+    } catch {
+      // Keep usable defaults when browser storage is unavailable or malformed.
+    }
+    setToolShortcuts(candidate);
+    setShortcutsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!shortcutsLoaded) return;
+    try { window.localStorage.setItem(toolShortcutsStorageKey, JSON.stringify(toolShortcuts)); }
+    catch { /* The editor still works for this visit when preferences cannot persist. */ }
+  }, [shortcutsLoaded, toolShortcuts]);
+
+  function changeToolShortcut(toolId: Tool, rawValue: string) {
+    const value = rawValue.trim().toLowerCase();
+    if (!/^[a-z0-9]$/.test(value)) {
+      setShortcutError("Choose one letter or number for each tool shortcut.");
+      return;
+    }
+    const collision = tools.find(({ id }) => id !== toolId && toolShortcuts[id] === value);
+    if (collision) {
+      setShortcutError(`${value.toUpperCase()} is already assigned to ${collision.label}.`);
+      return;
+    }
+    setShortcutError("");
+    setToolShortcuts((current) => ({ ...current, [toolId]: value }));
+  }
 
   useEffect(() => {
     if (!renameOpen || !renameDialog.current || renameDialog.current.open) return;
@@ -160,6 +230,21 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   }, [exportSelection]);
 
   useEffect(() => {
+    if (!pageToDelete || !deletePageDialog.current || deletePageDialog.current.open) return;
+    deletePageDialog.current.showModal();
+  }, [pageToDelete]);
+
+  useEffect(() => () => window.clearTimeout(undoPageTimer.current), []);
+
+  useEffect(() => {
+    if (studyItemOpen && studyItemDialog.current && !studyItemDialog.current.open) studyItemDialog.current.showModal();
+  }, [studyItemOpen]);
+
+  useEffect(() => {
+    if (shortcutsOpen && shortcutsDialog.current && !shortcutsDialog.current.open) shortcutsDialog.current.showModal();
+  }, [shortcutsOpen]);
+
+  useEffect(() => {
     if (saveStatus === "saved") return;
     function warn(event: BeforeUnloadEvent) { event.preventDefault(); event.returnValue = true; }
     window.addEventListener("beforeunload", warn);
@@ -174,9 +259,9 @@ export function NoteEditor({ noteId }: { noteId: string }) {
     const request = ++latestSave.current;
     try {
       await saveNote(saved);
-      if (request === latestSave.current) setSaveStatus("saved");
+      if (request === latestSave.current) { setSaveStatus("saved"); setSaveErrorMessage(""); }
     } catch (error) {
-      if (request === latestSave.current) setSaveStatus("error");
+      if (request === latestSave.current) { setSaveStatus("error"); setSaveErrorMessage(storageFailureMessage(error, "save this note")); }
       throw error;
     }
   }, []);
@@ -206,16 +291,40 @@ export function NoteEditor({ noteId }: { noteId: string }) {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.defaultPrevented || !(event.target instanceof HTMLElement) || event.target.closest("input, textarea, select, [contenteditable]")) return;
-      if ((event.metaKey || event.ctrlKey) && ["z", "y"].includes(event.key.toLowerCase())) {
+      if (event.defaultPrevented || !(event.target instanceof HTMLElement) || event.target.closest("input, textarea, select, [contenteditable], dialog")) return;
+      const key = event.key.toLowerCase();
+      const command = event.metaKey || event.ctrlKey;
+      if (command && ["z", "y"].includes(key)) {
         if (!page) return;
         event.preventDefault();
-        stepHistory(event.shiftKey || event.key.toLowerCase() === "y" ? "redo" : "undo");
+        stepHistory(event.shiftKey || key === "y" ? "redo" : "undo");
+      } else if (command && ["+", "=", "add"].includes(key)) {
+        event.preventDefault();
+        setZoom((value) => Math.min(2, Math.round((value + .1) * 10) / 10));
+      } else if (command && ["-", "subtract"].includes(key)) {
+        event.preventDefault();
+        setZoom((value) => Math.max(.5, Math.round((value - .1) * 10) / 10));
+      } else if (command && key === "0") {
+        event.preventDefault();
+        setZoom(1);
+      } else if ((event.key === "PageUp" || (command && event.key === "ArrowLeft")) && pageIndex > 0) {
+        event.preventDefault();
+        setPageIndex((current) => Math.max(0, current - 1));
+      } else if ((event.key === "PageDown" || (command && event.key === "ArrowRight")) && note && pageIndex < note.pages.length - 1) {
+        event.preventDefault();
+        setPageIndex((current) => Math.min((noteRef.current?.pages.length ?? 1) - 1, current + 1));
+      } else if (event.key === "?") {
+        event.preventDefault();
+        setShortcutsOpen(true);
+      } else if (!command && !event.altKey) {
+        const shortcutTool = Object.fromEntries(Object.entries(toolShortcuts).map(([id, shortcut]) => [shortcut, id])) as Record<string, Tool>;
+        const nextTool = shortcutTool[key];
+        if (nextTool) { event.preventDefault(); setTool(nextTool); setWidthSlider(undefined); }
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [page, stepHistory]);
+  }, [note, page, pageIndex, stepHistory, toolShortcuts]);
 
   function addPage() {
     if (!note) return;
@@ -223,15 +332,98 @@ export function NoteEditor({ noteId }: { noteId: string }) {
     void persist({ ...note, pages: [...note.pages, pageItem] }).then(() => setPageIndex(note.pages.length)).catch(() => undefined);
   }
 
+  function openStudyItem() {
+    setStudyItemType("flashcard");
+    setStudyPrompt("");
+    setStudyAnswer("");
+    setStudyItemError("");
+    setStudyItemOpen(true);
+  }
+
+  async function submitStudyItem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!note || !page) return;
+    const prompt = studyPrompt.trim();
+    const answer = studyAnswer.trim();
+    if (!prompt || !answer) { setStudyItemError("Add both sides before saving."); return; }
+    const item: StudyItem = { id: crypto.randomUUID(), type: studyItemType, pageId: page.id, prompt, answer, createdAt: Date.now(), againCount: 0, gotItCount: 0 };
+    setStudyItemError("");
+    try {
+      await persist({ ...note, studyItems: [...(note.studyItems ?? []), item] });
+      studyItemDialog.current?.close();
+      setStudyItemOpen(false);
+    } catch {
+      setStudyItemError("Couldn’t save this study item. Keep this note open and try again.");
+    }
+  }
+
+  function reorderPages(sourceId: string, targetId: string) {
+    const current = noteRef.current;
+    if (!current || sourceId === targetId) return;
+    const from = current.pages.findIndex((item) => item.id === sourceId);
+    const to = current.pages.findIndex((item) => item.id === targetId);
+    if (from < 0 || to < 0) return;
+    const pages = [...current.pages];
+    const [moved] = pages.splice(from, 1);
+    pages.splice(to, 0, moved);
+    const selectedId = page?.id;
+    void persist({ ...current, pages }).then(() => {
+      if (selectedId) setPageIndex(pages.findIndex((item) => item.id === selectedId));
+    }).catch(() => undefined);
+  }
+
+  function duplicatePage() {
+    const current = noteRef.current;
+    const source = current?.pages.find((item) => item.id === page?.id);
+    if (!current || !source) return;
+    const duplicate: Page = {
+      ...source,
+      id: crypto.randomUUID(),
+      strokes: source.strokes.map((stroke) => ({ ...stroke, id: crypto.randomUUID(), points: stroke.points.map((point) => ({ ...point })) })),
+      textBoxes: source.textBoxes.map((box) => ({ ...box, id: crypto.randomUUID() })),
+    };
+    const pages = [...current.pages];
+    const index = pages.findIndex((item) => item.id === source.id) + 1;
+    pages.splice(index, 0, duplicate);
+    void persist({ ...current, pages }).then(() => setPageIndex(index)).catch(() => undefined);
+  }
+
+  function confirmPageDelete() {
+    const current = noteRef.current;
+    if (!current || current.pages.length <= 1 || !pageToDelete) return;
+    const index = current.pages.findIndex((item) => item.id === pageToDelete);
+    if (index < 0) return;
+    const [removed] = current.pages.slice(index, index + 1);
+    const pages = current.pages.filter((item) => item.id !== pageToDelete);
+    window.clearTimeout(undoPageTimer.current);
+    setDeletedPage({ page: removed, index });
+    undoPageTimer.current = window.setTimeout(() => setDeletedPage(undefined), 8000);
+    void persist({ ...current, pages }).then(() => setPageIndex(Math.min(index, pages.length - 1))).catch(() => undefined);
+    deletePageDialog.current?.close();
+  }
+
+  function undoPageDelete() {
+    const current = noteRef.current;
+    if (!current || !deletedPage) return;
+    const pages = [...current.pages];
+    const index = Math.min(deletedPage.index, pages.length);
+    pages.splice(index, 0, deletedPage.page);
+    window.clearTimeout(undoPageTimer.current);
+    setDeletedPage(undefined);
+    void persist({ ...current, pages }).then(() => setPageIndex(index)).catch(() => undefined);
+  }
+
   async function saveSettings(updated: EditorSettings) {
     setSettings(updated);
     setSettingsError(false);
-    try { await saveEditorSettings(updated); } catch { setSettingsError(true); }
+    setSettingsErrorMessage("");
+    try { await saveEditorSettings(updated); setSettingsError(false); }
+    catch (error) { setSettingsError(true); setSettingsErrorMessage(storageFailureMessage(error, "save your editor settings")); }
   }
 
   function selectColor(value: string) {
-    if (colorTool !== "pen" && colorTool !== "pencil") return;
-    setInkColors((current) => ({ ...current, [colorTool]: value }));
+    if (tool !== "pen" && tool !== "pencil") return;
+    setInkColors((current) => ({ ...current, [tool]: value }));
   }
 
   function addColor(value: string) {
@@ -363,8 +555,10 @@ export function NoteEditor({ noteId }: { noteId: string }) {
       </button>
       <div className="editor-top-actions">
         <span className="save-indicator" role="status">{saveStatus === "saved" ? <><Check size={15} /><span>Saved</span></> : saveStatus === "saving" ? "Saving…" : "Unsaved"}</span>
+        <button type="button" className={note.bookmarked ? "file-action saved-bookmark" : "file-action"} aria-label={note.bookmarked ? "Remove note bookmark" : "Bookmark note"} aria-pressed={!!note.bookmarked} data-tooltip={note.bookmarked ? "Bookmarked" : "Bookmark note"} onClick={() => void persist({ ...note, bookmarked: !note.bookmarked })}><Bookmark size={17} fill={note.bookmarked ? "currentColor" : "none"} /></button>
         <button type="button" className="file-action" onClick={() => uploadInput.current?.click()} aria-label="Upload pages" data-tooltip="Upload"><Upload size={17} /><span>Upload</span></button>
         <button type="button" className="file-action" onClick={openExport} aria-label="Export PDF" data-tooltip="Export PDF"><Download size={17} /><span>Export</span></button>
+        <button type="button" className="file-action shortcut-help-button" aria-label="Keyboard shortcuts" aria-haspopup="dialog" onClick={() => setShortcutsOpen(true)} data-tooltip="Keyboard shortcuts"><Keyboard size={17} /><span>Shortcuts</span></button>
         <input ref={uploadInput} hidden type="file" multiple accept=".pdf,.docx,.png,.jpg,.jpeg,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg"
           onChange={(event) => { void uploadFiles(event.currentTarget.files); event.currentTarget.value = ""; }} />
         <button type="button" className="assistant-toggle" aria-label="AI tutor" aria-expanded={aiOpen} aria-controls={aiOpen ? "ai-panel" : undefined} onClick={() => setAiOpen(!aiOpen)}><Sparkles size={17} /><span>AI tutor</span></button>
@@ -384,8 +578,7 @@ export function NoteEditor({ noteId }: { noteId: string }) {
       {tool === "shape" && <label className="shape-picker">Shape
         <select aria-label="Shape type" value={shapeKind} onChange={(event) => setShapeKind(event.target.value as ShapeKind)}>
           <option value="line">Line</option><option value="rectangle">Rectangle</option><option value="circle">Circle</option>
-        </select>
-        <span className="shape-hint">{shapeKind === "circle" ? "Drag from center to edge" : shapeKind === "rectangle" ? "Drag between opposite corners" : "Drag between endpoints"}</span>
+        </select><span className="shape-hint">{shapeKind === "circle" ? "Drag from center to edge" : shapeKind === "rectangle" ? "Drag between opposite corners" : "Drag between endpoints"}</span>
       </label>}
       {(colorTool === "pen" || colorTool === "pencil") && <InkPalette tool={tool === "shape" ? "shape" : colorTool} swatches={availableSwatches(settings)} selected={inkColors[colorTool]}
         onSelect={selectColor} onSave={addColor} onRemove={removeColors} />}
@@ -421,18 +614,45 @@ export function NoteEditor({ noteId }: { noteId: string }) {
       </div>
     </div>
     {(saveStatus === "error" || settingsError || fileActionError) && <div className="save-error" role="alert">
-      {fileActionError || (settingsError ? "Couldn’t save your editor settings in this browser." : "Couldn’t save your changes. Keep this note open and try again.")}
-      {saveStatus === "error" && <button className="button button-outline" onClick={() => void persist(note).catch(() => undefined)}>Retry save</button>}
+      {fileActionError || (settingsError ? settingsErrorMessage : saveErrorMessage)}
+      {saveStatus === "error" && <button type="button" className="button button-outline" onClick={() => void persist(note).catch(() => undefined)}>Retry save</button>}
       {fileActionError && <button type="button" className="icon-button" aria-label="Dismiss" onClick={() => setFileActionError("")}><X size={16} /></button>}
     </div>}
     <div className="editor-body">
       <main className="editor-workspace">
         <InkCanvas key={page.id} page={page} pageNumber={pageIndex + 1} paper={note.paper} paperSpacing={note.paperSpacing}
-          tool={drawingTool} zoom={zoom} clipboard={clipboard} onCopy={setClipboard} onEdit={editPage} />
+          tool={drawingTool} zoom={zoom} clipboard={clipboard} toolShortcuts={toolShortcuts} onCopy={setClipboard} onEdit={editPage} onZoomChange={setZoom} />
+        <nav className="page-thumbnails" aria-label="Page thumbnails">
+          <div className="page-thumbnail-strip">
+            {note.pages.map((item, index) => <div className="page-thumbnail-card" key={item.id}
+              draggable
+              onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", item.id); setDraggedPageId(item.id); }}
+              onDragEnd={() => setDraggedPageId(undefined)}
+              onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; }}
+              onDrop={(event) => { event.preventDefault(); reorderPages(event.dataTransfer.getData("text/plain") || draggedPageId || "", item.id); setDraggedPageId(undefined); }}>
+              <button type="button" className={page.id === item.id ? "page-thumbnail current" : "page-thumbnail"}
+                aria-label={`Go to page ${index + 1}`} aria-current={page.id === item.id ? "page" : undefined}
+                onClick={() => setPageIndex(index)}>
+                <NotePagePreview note={note} page={item} label="" resolution={0.35} />
+                <span>Page {index + 1}</span>
+              </button>
+              <div className="page-thumbnail-actions" aria-label={`Reorder page ${index + 1}`}>
+                <button type="button" aria-label={`Move page ${index + 1} earlier`} title="Move earlier" disabled={index === 0} onClick={() => reorderPages(item.id, note.pages[index - 1].id)}><ChevronLeft size={14} /></button>
+                <button type="button" aria-label={`Move page ${index + 1} later`} title="Move later" disabled={index === note.pages.length - 1} onClick={() => reorderPages(item.id, note.pages[index + 1].id)}><ChevronRight size={14} /></button>
+              </div>
+            </div>)}
+          </div>
+        </nav>
+        {deletedPage && <div className="page-undo" role="status" aria-live="polite">
+          <span>Page {deletedPage.index + 1} deleted.</span><button type="button" onClick={undoPageDelete}>Undo</button>
+        </div>}
         <nav className="editor-pagination" aria-label="Note pages">
           <ToolButton label="Previous page" disabled={pageIndex === 0} onClick={() => setPageIndex(pageIndex - 1)}><ChevronLeft size={20} /></ToolButton>
           <span aria-live="polite">Page {pageIndex + 1} of {note.pages.length}</span>
           <ToolButton label="Next page" disabled={pageIndex + 1 === note.pages.length} onClick={() => setPageIndex(pageIndex + 1)}><ChevronRight size={20} /></ToolButton>
+          <button type="button" className="page-action" onClick={duplicatePage}><Copy size={16} /> Duplicate</button>
+          <button type="button" className="page-action page-delete-action" disabled={note.pages.length <= 1} onClick={() => setPageToDelete(page.id)}><Trash2 size={16} /> Delete</button>
+          <button type="button" className="page-action" onClick={openStudyItem}><BookMarked size={16} /> Add study item{note.studyItems?.filter((item) => item.pageId === page.id).length ? ` (${note.studyItems.filter((item) => item.pageId === page.id).length})` : ""}</button>
           <button type="button" className="add-page" onClick={addPage}><Plus size={18} /> Add page</button>
         </nav>
       </main>
@@ -461,6 +681,48 @@ export function NoteEditor({ noteId }: { noteId: string }) {
           <button className="button button-primary">Save paper settings</button>
         </div>
       </form>
+    </dialog>
+    <dialog ref={studyItemDialog} className="create-dialog study-item-dialog" aria-labelledby="study-item-title" onClose={() => setStudyItemOpen(false)}>
+      <form onSubmit={(event) => void submitStudyItem(event)}>
+        <div className="dialog-header"><div><h2 id="study-item-title">Add study item</h2><p>Linked to page {pageIndex + 1} of “{note.name}”.</p></div>
+          <button type="button" className="icon-button" aria-label="Close" onClick={() => studyItemDialog.current?.close()}><X size={21} /></button></div>
+        <label className="field">Type
+          <select value={studyItemType} onChange={(event) => setStudyItemType(event.currentTarget.value as StudyItem["type"])}><option value="flashcard">Flashcard</option><option value="question">Practice question</option></select>
+        </label>
+        <label className="field">{studyItemType === "flashcard" ? "Front" : "Question"}<textarea value={studyPrompt} rows={3} maxLength={1200} required onChange={(event) => setStudyPrompt(event.currentTarget.value)} placeholder={studyItemType === "flashcard" ? "Term, idea, or prompt" : "Write a short-answer practice question"} /></label>
+        <label className="field">{studyItemType === "flashcard" ? "Back" : "Answer"}<textarea value={studyAnswer} rows={3} maxLength={2400} required onChange={(event) => setStudyAnswer(event.currentTarget.value)} placeholder={studyItemType === "flashcard" ? "Definition or explanation" : "Write the answer you want to practice"} /></label>
+        <button type="button" className="button button-outline ai-draft-placeholder" disabled title="AI drafting is planned for a later update"><Sparkles size={16} /> Draft with AI · coming soon</button>
+        {studyItemError && <p className="error-text" role="alert">{studyItemError}</p>}
+        <div className="dialog-actions"><button type="button" className="button button-outline" onClick={() => studyItemDialog.current?.close()}>Cancel</button><button className="button button-primary">Save study item</button></div>
+      </form>
+    </dialog>
+    <dialog ref={shortcutsDialog} className="create-dialog shortcuts-dialog" aria-labelledby="shortcuts-title" onClose={() => setShortcutsOpen(false)}>
+      <div className="dialog-header"><h2 id="shortcuts-title">Keyboard shortcuts</h2><button type="button" className="icon-button" aria-label="Close keyboard shortcuts" onClick={() => shortcutsDialog.current?.close()}><X size={21} /></button></div>
+      <dl className="shortcut-list">
+        <div><dt>Undo / redo</dt><dd><kbd>⌘/Ctrl Z</kbd> · <kbd>⌘/Ctrl Shift Z</kbd></dd></div>
+        <div><dt>Copy / paste selection</dt><dd><kbd>⌘/Ctrl C</kbd> · <kbd>⌘/Ctrl V</kbd> in Lasso</dd></div>
+        <div><dt>Previous / next page</dt><dd><kbd>Page Up</kbd> · <kbd>Page Down</kbd> (or <kbd>⌘/Ctrl ←/→</kbd>)</dd></div>
+        <div><dt>Zoom in / out / reset</dt><dd><kbd>⌘/Ctrl +</kbd> · <kbd>⌘/Ctrl −</kbd> · <kbd>⌘/Ctrl 0</kbd></dd></div>
+        <div><dt>Open this guide</dt><dd><kbd>?</kbd></dd></div>
+      </dl>
+      <fieldset className="tool-shortcut-settings">
+        <legend>Tool shortcuts</legend>
+        <p>Choose one letter or number per tool. Changes are saved in this browser.</p>
+        <div className="tool-shortcut-grid">{tools.map(({ id, label }) => <label key={id} className="tool-shortcut-field">{label}
+          <input aria-label={`${label} shortcut`} value={toolShortcuts[id].toUpperCase()} maxLength={1} onFocus={(event) => event.currentTarget.select()} onChange={(event) => changeToolShortcut(id, event.currentTarget.value)} />
+        </label>)}</div>
+        {shortcutError && <p className="error-text" role="alert">{shortcutError}</p>}
+        <button type="button" className="button button-outline" onClick={() => { setToolShortcuts(defaultToolShortcuts); setShortcutError(""); }}>Reset tool shortcuts</button>
+      </fieldset>
+      <p className="shortcut-note">Undo, page, and zoom shortcuts are fixed. Tool shortcuts pause while you type or a dialog is open.</p>
+      <div className="dialog-actions"><button type="button" className="button button-primary" onClick={() => shortcutsDialog.current?.close()}>Done</button></div>
+    </dialog>
+    <dialog ref={deletePageDialog} className="create-dialog" aria-labelledby="delete-page-title" onClose={() => setPageToDelete(undefined)}>
+      <div className="dialog-header"><h2 id="delete-page-title">Delete page?</h2>
+        <button type="button" className="icon-button" aria-label="Close" onClick={() => deletePageDialog.current?.close()}><X size={21} /></button></div>
+      <p>This removes page {note.pages.findIndex((item) => item.id === pageToDelete) + 1} from “{note.name}”. You can undo for a few seconds after deleting it.</p>
+      <div className="dialog-actions"><button type="button" className="button button-outline" onClick={() => deletePageDialog.current?.close()}>Cancel</button>
+        <button type="button" className="button button-primary page-delete-confirm" onClick={confirmPageDelete}>Delete page</button></div>
     </dialog>
     <dialog ref={eraserDialog} className="create-dialog" aria-labelledby="eraser-title">
       <div className="dialog-header"><h2 id="eraser-title">Eraser mode</h2>

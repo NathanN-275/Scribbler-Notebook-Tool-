@@ -7,15 +7,20 @@ Build a browser-based note-taking frontend for the cloud computing class project
 ## Agreed scope
 
 - Landing page explains the note-taking product and its planned AI tutor, with a **Try the tool** button leading to the library.
-- The library shows a grid of flat folders and notes. Users can create folders and create notes with a name and paper type.
-- A note contains multiple pages. Users can add pages and move between them. Reordering and deleting pages are deferred.
+- The library shows filterable All notes, Study tags, Study material, and Trash views. Users can search and sort notes, rename notes and folders, move notes by drag-and-drop or bulk selection, and move deleted notes to recoverable Trash.
+- Deleting a folder removes the folder and moves its notes to the unfiled All notes view. Trash keeps deleted notes and imported pages until the user empties it.
+- Notes can be bookmarked and tagged. Study tags filter their notes, while study material can be searched by prompt or answer.
+- Users manually create page-linked flashcards and short-answer questions, then review one at a time, reveal the answer, and mark “Again” or “Got it”. Review history is stored without a spaced-repetition schedule. AI drafting is a disabled placeholder.
+- A note contains one or more pages. Users can add, navigate, reorder, duplicate, and delete pages from a thumbnail strip; each note always keeps at least one page.
 - Each note starts with lined, graph, or dotted paper. Users can change paper from inside the editor; the selected paper applies to all pages in that note.
 - The editor follows the reference screenshot's broad layout: top navigation and tool controls, a large paper canvas, compact page navigation, and Scribbler styling.
 - The editor has pen, pencil, eraser, lasso, undo, and redo. Pen and pencil have independent size presets and color swatches. Lasso selection supports moving and deleting ink strokes.
 - A toggleable AI panel appears as a nonfunctional placeholder. Live AI, handwriting recognition, and AWS integration are deferred.
-- Support mouse/trackpad and touch input.
+- Support mouse/trackpad and touch input. One finger draws or pans; two fingers pan and pinch to zoom.
+- Provide keyboard shortcuts for undo/redo, selection copy/paste, page navigation, zoom, and drawing-tool selection, with a visible accessible guide and browser-local editable tool bindings (Q/W/E/R/T/Y by default).
+- Explain storage-full and storage-unavailable save failures and keep an explicit retry action in the editor.
 - Save changes automatically in the current browser using IndexedDB. No sign-in or cross-device sync.
-- Sharing, export, and nested folders are deferred.
+- Sharing and nested folders are deferred. PDF export and full-library backup/restore, including Trash, are available locally.
 
 ## Recommended implementation
 
@@ -74,7 +79,7 @@ Build a browser-based note-taking frontend for the cloud computing class project
 
 - Live AI chat, AWS model hosting/inference, handwriting recognition, or AI feedback on selected notes.
 - User accounts, server-side note storage, or sync across browsers/devices.
-- Export, sharing, nested folders, page reorder/delete, text recognition, or additional drawing tools.
+- Sharing, nested folders, text recognition, or additional drawing tools.
 
 ## Decisions to settle during implementation
 
